@@ -1,0 +1,22 @@
+# Dépendances et caches
+node_modules/
+.pnpm-store/
+.turbo/
+
+# Builds des applications
+.next/
+dist/
+build/
+*.tsbuildinfo
+
+# Fichiers d'environnement
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env*.local
+
+# Divers
+.DS_Store
+*.log
