@@ -1,0 +1,11 @@
+services:
+  manhwa-db-dev:
+    image: "postgres:16-alpine"
+    ports:
+      - 5431:5432
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: dev_password
+      POSTGRES_DB: manhwa_dev
+    volumes:
+      - ./db-data/:/var/lib/postgresql/data/

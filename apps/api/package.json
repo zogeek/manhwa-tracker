@@ -2,21 +2,26 @@
   "name": "api",
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "tsx --env-file=.env.development watch src/index.ts",
+    "start": "node --env-file=.env.production dist/index.js",
     "build": "tsc",
-    "start": "node dist/index.js"
+    "db:push:dev": "dotenv -e .env.development -- drizzle-kit push",
+    "db:push:prod": "dotenv -e .env.production -- drizzle-kit push"
   },
   "dependencies": {
     "@hono/node-server": "^1.19.14",
+    "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
     "hono": "^4.12.23",
-    "pg": "^8.21.0"
+    "pg": "^8.21.0",
+    "postgres": "^3.4.9"
   },
   "devDependencies": {
     "@types/node": "^20.11.17",
     "@types/pg": "^8.20.0",
+    "dotenv-cli": "^11.0.0",
     "drizzle-kit": "^0.31.10",
-    "tsx": "^4.7.1",
+    "tsx": "^4.22.4",
     "typescript": "^5.8.3"
   }
 }
