@@ -6,7 +6,7 @@ import { manhwas } from "./shared/db/schema.ts";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { zValidator } from "@hono/zod-validator";
-import manhwaRouteur from "./routes/manhwa/index.ts";
+import sourceRouter from "./modules/sources/source.route.js";
 
 const app = new Hono();
 
@@ -35,7 +35,7 @@ const routes = app
     .get("/health", (c) => {
         return c.json({ status: "OK" });
     })
-    .route("/manhwa", manhwaRouteur)
+    .route("/source", sourceRouter)
 
 serve(
     {
