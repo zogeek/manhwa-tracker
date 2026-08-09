@@ -1,24 +1,24 @@
 import type { Context } from 'hono';
-import { SourceService } from './source.service.js';
+import { ManhwaService } from './manhwa.service.js';
 import { AppError } from '../../shared/lib/errors.js';
 
-export class SourceController {
-  private readonly service: SourceService;
+export class ManhwaController {
+  private readonly service: ManhwaService;
 
-  constructor(service?: SourceService) {
-    this.service = service ?? new SourceService();
+  constructor(service?: ManhwaService) {
+    this.service = service ?? new ManhwaService();
   }
 
   getAll = async (c: Context): Promise<Response> => {
-    const sources = await this.service.getAll();
-    return c.json(sources);
+    const manhwas = await this.service.getAll();
+    return c.json(manhwas);
   };
 
   getById = async (c: Context): Promise<Response> => {
     try {
       const { id } = c.req.valid('param' as never);
-      const source = await this.service.getById(id);
-      return c.json(source);
+      const manhwa = await this.service.getById(id);
+      return c.json(manhwa);
     } catch (error) {
       return this.handleError(c, error);
     }
@@ -28,8 +28,8 @@ export class SourceController {
     try {
       const data = c.req.valid('json' as never);
       const userId = c.get('userId') as string | undefined;
-      const source = await this.service.create(data, userId);
-      return c.json(source, 201);
+      const manhwa = await this.service.create(data, userId);
+      return c.json(manhwa, 201);
     } catch (error) {
       return this.handleError(c, error);
     }
@@ -40,8 +40,8 @@ export class SourceController {
       const { id } = c.req.valid('param' as never);
       const data = c.req.valid('json' as never);
       const userId = c.get('userId') as string | undefined;
-      const source = await this.service.update(id, data, userId);
-      return c.json(source);
+      const manhwa = await this.service.update(id, data, userId);
+      return c.json(manhwa);
     } catch (error) {
       return this.handleError(c, error);
     }

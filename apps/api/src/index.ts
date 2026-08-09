@@ -1,50 +1,37 @@
-import { serve } from "@hono/node-server";
-import { Hono } from "hono";
-import { cors } from "hono/cors";
-import { db } from "./shared/db/index.ts";
-import { manhwas } from "./shared/db/schema.ts";
-import { eq } from "drizzle-orm";
-import { z } from "zod";
-import { zValidator } from "@hono/zod-validator";
-import sourceRouter from "./modules/sources/source.route.js";
+import { serve } from '@hono/node-server';
+import { Hono } from 'hono';
+import { cors } from 'hono/cors';
+import { sourceRouter } from './modules/sources/source.route.js';
+import { manhwaRouter } from './modules/manhwas/manhwa.route.js';
 
 const app = new Hono();
 
 app.use(
-    "*",
-    cors({
-        origin: "http://localhost:3000",
-        credentials: true,
-    }),
+  '*',
+  cors({
+    origin: 'http://localhost:3000',
+    credentials: true,
+  }),
 );
 
-const createManhwaSchema = z.object({
-    title: z.string(),
-    currentChapterRead: z.number().default(0),
-    latestChapterAvailable: z.number().default(0),
-});
-
-const updateManhwaSchema = z.object({
-    currentChapterRead: z.number(),
+app.onError((err, c) => {
+  console.error('[UNHANDLED_ERROR]', err.message, err.stack);
+  return c.json({ error: 'Internal server error' }, 500);
 });
 
 const routes = app
-    .get("/", (c) => {
-        return c.text("Hello Hono!");
-    })
-    .get("/health", (c) => {
-        return c.json({ status: "OK" });
-    })
-    .route("/source", sourceRouter)
+  .get('/health', (c) => c.json({ status: 'OK' }))
+  .route('/sources', sourceRouter)
+  .route('/manhwas', manhwaRouter);
 
 serve(
-    {
-        fetch: app.fetch,
-        port: 3001,
-    },
-    (info) => {
-        console.log(`Server is running on http://localhost:${info.port}`);
-    },
+  {
+    fetch: app.fetch,
+    port: 3001,
+  },
+  (info) => {
+    console.log(`Server is running on http://localhost:${info.port}`);
+  },
 );
 
 export type AppType = typeof routes;
