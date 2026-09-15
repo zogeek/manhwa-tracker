@@ -3,6 +3,9 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { sourceRouter } from './modules/sources/source.route.js';
 import { manhwaRouter } from './modules/manhwas/manhwa.route.js';
+import { chapterRouter } from './modules/chapters/chapter.route.js';
+import { genresRouter as genreRouter } from './modules/genres/genre.route.js';
+import { readingRouter } from './modules/reading/reading.route.js';
 
 const app = new Hono();
 
@@ -22,7 +25,10 @@ app.onError((err, c) => {
 const routes = app
   .get('/health', (c) => c.json({ status: 'OK' }))
   .route('/sources', sourceRouter)
-  .route('/manhwas', manhwaRouter);
+  .route('/manhwas', manhwaRouter)
+  .route('/chapters', chapterRouter)
+  .route('/genres', genreRouter)
+  .route('/reading', readingRouter);
 
 serve(
   {

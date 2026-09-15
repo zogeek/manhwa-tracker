@@ -1,22 +1,28 @@
-import { createInsertSchema } from 'drizzle-zod';
 import { z } from 'zod';
-import { manhwas } from './chapter.schema.js';
+import { createInsertSchema } from 'drizzle-zod';
+import { chapters } from './chapter.schema.js';
 
-export const createManhwaSchema = createInsertSchema(manhwas, {
-  title: z.string().min(1, 'Le titre est requis'),
-}).omit({
-  id: true,
-  createdAt: true,
-  createdBy: true,
-  updatedBy: true,
-  deletedAt: true,
+export const createChapterSchema = createInsertSchema(chapters)
+  .omit({
+    id: true,
+    createdAt: true,
+    createdBy: true,
+    deletedAt: true,
+  })
+  .extend({
+    manhwaId: z.string().uuid(),
+    number: z.number().int().positive(),
+  });
+
+export const updateChapterSchema = createChapterSchema.partial();
+
+export const chapterIdParamSchema = z.object({
+  id: z.string().uuid(),
 });
-
-export const updateManhwaSchema = createManhwaSchema.partial();
 
 export const manhwaIdParamSchema = z.object({
-  id: z.uuid('ID invalide'),
+  manhwaId: z.string().uuid(),
 });
 
-export type CreateManhwaInput = z.infer<typeof createManhwaSchema>;
-export type UpdateManhwaInput = z.infer<typeof updateManhwaSchema>;
+export type CreateChapterInput = z.infer<typeof createChapterSchema>;
+export type UpdateChapterInput = z.infer<typeof updateChapterSchema>;
