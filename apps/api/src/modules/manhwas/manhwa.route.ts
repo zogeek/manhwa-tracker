@@ -9,7 +9,8 @@ import {
   manhwaIdParamSchema,
 } from './manhwa.validator.js';
 
-export const createManhwaRoutes = (service: ManhwaService, { requireAuth }: AuthMiddleware) =>
+/** Catalogue : lecture publique, mutations réservées au rôle admin. */
+export const createManhwaRoutes = (service: ManhwaService, { requireAdmin }: AuthMiddleware) =>
   new Hono<AppEnv>()
     .get('/', async (c) => {
       const manhwas = await service.getAll();
@@ -20,13 +21,13 @@ export const createManhwaRoutes = (service: ManhwaService, { requireAuth }: Auth
       const manhwa = await service.getById(id);
       return c.json({ data: manhwa }, 200);
     })
-    .post('/', requireAuth, validate('json', createManhwaSchema), async (c) => {
+    .post('/', requireAdmin, validate('json', createManhwaSchema), async (c) => {
       const manhwa = await service.create(c.req.valid('json'), c.get('user').id);
       return c.json({ data: manhwa }, 201);
     })
     .patch(
       '/:id',
-      requireAuth,
+      requireAdmin,
       validate('param', manhwaIdParamSchema),
       validate('json', updateManhwaSchema),
       async (c) => {
@@ -35,7 +36,7 @@ export const createManhwaRoutes = (service: ManhwaService, { requireAuth }: Auth
         return c.json({ data: manhwa }, 200);
       },
     )
-    .delete('/:id', requireAuth, validate('param', manhwaIdParamSchema), async (c) => {
+    .delete('/:id', requireAdmin, validate('param', manhwaIdParamSchema), async (c) => {
       const { id } = c.req.valid('param');
       await service.delete(id, c.get('user').id);
       return c.body(null, 204);

@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { manhwaGenres, manhwas } from '../../shared/db/schema.js';
 import { seedCatalog, type SeededCatalog } from '../../shared/db/seed.test.js';
-import { createTestContext, signUp, type TestUser } from '../../test/integration.js';
+import { createTestContext, signUpAdmin, type TestUser } from '../../test/integration.js';
 
 const context = createTestContext();
 
@@ -11,7 +11,7 @@ let editor: TestUser;
 
 beforeAll(async () => {
   catalog = await seedCatalog(context.db);
-  editor = await signUp(context, 'editor');
+  editor = await signUpAdmin(context, 'editor');
 });
 
 afterAll(() => context.close());

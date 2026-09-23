@@ -9,7 +9,8 @@ import {
   sourceIdParamSchema,
 } from './source.validator.js';
 
-export const createSourceRoutes = (service: SourceService, { requireAuth }: AuthMiddleware) =>
+/** Catalogue : lecture publique, mutations réservées au rôle admin. */
+export const createSourceRoutes = (service: SourceService, { requireAdmin }: AuthMiddleware) =>
   new Hono<AppEnv>()
     .get('/', async (c) => {
       const sources = await service.getAll();
@@ -20,13 +21,13 @@ export const createSourceRoutes = (service: SourceService, { requireAuth }: Auth
       const source = await service.getById(id);
       return c.json({ data: source }, 200);
     })
-    .post('/', requireAuth, validate('json', createSourceSchema), async (c) => {
+    .post('/', requireAdmin, validate('json', createSourceSchema), async (c) => {
       const source = await service.create(c.req.valid('json'), c.get('user').id);
       return c.json({ data: source }, 201);
     })
     .patch(
       '/:id',
-      requireAuth,
+      requireAdmin,
       validate('param', sourceIdParamSchema),
       validate('json', updateSourceSchema),
       async (c) => {
@@ -35,7 +36,7 @@ export const createSourceRoutes = (service: SourceService, { requireAuth }: Auth
         return c.json({ data: source }, 200);
       },
     )
-    .delete('/:id', requireAuth, validate('param', sourceIdParamSchema), async (c) => {
+    .delete('/:id', requireAdmin, validate('param', sourceIdParamSchema), async (c) => {
       const { id } = c.req.valid('param');
       await service.delete(id, c.get('user').id);
       return c.body(null, 204);

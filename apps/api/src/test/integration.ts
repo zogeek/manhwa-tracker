@@ -1,10 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { testClient } from 'hono/testing';
 import { inject } from 'vitest';
+import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { createApp } from '../app.js';
 import { createContainer } from '../container.js';
+import { ADMIN_ROLE } from '../shared/auth/index.js';
 import { createDatabase } from '../shared/db/index.js';
+import { user } from '../shared/db/schema.js';
 
 export const TEST_ORIGIN = 'http://localhost:3000';
 
@@ -61,4 +64,11 @@ export async function signUp(context: TestContext, name: string): Promise<TestUs
     .join('; ');
   const { user } = signUpResponseSchema.parse(await res.json());
   return { id: user.id, headers: { cookie } };
+}
+
+/** Inscrit un utilisateur puis le promeut admin (équivalent de `pnpm admin:promote`). */
+export async function signUpAdmin(context: TestContext, name: string): Promise<TestUser> {
+  const admin = await signUp(context, name);
+  await context.db.update(user).set({ role: ADMIN_ROLE }).where(eq(user.id, admin.id));
+  return admin;
 }
