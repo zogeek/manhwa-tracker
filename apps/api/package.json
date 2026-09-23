@@ -8,12 +8,15 @@
     "start": "node --env-file-if-exists=.env.production dist/index.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:unit": "vitest run --project unit",
+    "test:integration": "vitest run --project integration",
     "test:watch": "vitest",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:migrate:prod": "NODE_ENV=production drizzle-kit migrate",
     "db:push": "drizzle-kit push",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "auth:generate": "auth generate --config better-auth.config.ts --output src/shared/db/auth-schema.ts --yes"
   },
   "dependencies": {
     "@hono/node-server": "^1.19.17",
@@ -26,8 +29,10 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@testcontainers/postgresql": "^12.1.0",
     "@types/node": "^24.13.6",
     "@types/pg": "^8.23.1",
+    "auth": "1.7.5",
     "drizzle-kit": "^0.31.11",
     "tsx": "^4.23.15",
     "typescript": "^5.9.3",
