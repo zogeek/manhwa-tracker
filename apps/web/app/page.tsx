@@ -705,7 +705,7 @@ export default function Home() {
               Fait avec <Heart size={10} className="text-red-500/60" /> par l'équipe
             </p>
             <a href="#" className="hover:text-zinc-400 transition-colors" aria-label="GitHub">
-              <GithubIcon size={15} />
+              <GithubIcon width={15} height={15} />
             </a>
             <a href="#" className="hover:text-zinc-400 transition-colors" aria-label="Discord">
               <MessageCircle size={15} />
