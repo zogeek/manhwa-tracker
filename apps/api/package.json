@@ -1,31 +1,33 @@
 {
   "name": "api",
+  "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node --import tsx --env-file=.env.development --watch src/index.ts",
-    "start": "node --env-file=.env.production dist/index.js",
-    "build": "tsc",
-    "db:push:dev": "dotenv -e .env.development -- drizzle-kit push",
-    "db:push:prod": "dotenv -e .env.production -- drizzle-kit push"
+    "dev": "node --env-file-if-exists=.env.development --import tsx --watch src/index.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node --env-file-if-exists=.env.production dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:migrate:prod": "NODE_ENV=production drizzle-kit migrate",
+    "db:push": "drizzle-kit push",
+    "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
-    "@hono/node-server": "^1.19.14",
-    "@hono/zod-validator": "^0.9.0",
-    "better-auth": "^1.7.1",
-    "dotenv": "^17.4.2",
-    "drizzle-orm": "^0.45.2",
+    "@hono/node-server": "^1.19.17",
+    "@hono/zod-validator": "^0.9.1",
+    "better-auth": "^1.7.5",
+    "drizzle-orm": "^0.45.3",
     "drizzle-zod": "^0.8.3",
-    "hono": "^4.12.23",
-    "pg": "^8.21.0",
-    "postgres": "^3.4.9",
-    "zod": "^4.4.3"
+    "hono": "^4.13.8",
+    "pg": "^8.23.0",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@types/node": "^20.11.17",
-    "@types/pg": "^8.20.0",
-    "dotenv-cli": "^11.0.0",
-    "drizzle-kit": "^0.31.10",
-    "tsx": "^4.22.4",
-    "typescript": "^5.8.3"
+    "@types/node": "^24.13.6",
+    "@types/pg": "^8.23.1",
+    "drizzle-kit": "^0.31.11",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3"
   }
 }
