@@ -1,45 +1,54 @@
-import { eq, isNull } from "drizzle-orm";
-import { db } from "../../shared/db/index.js";
-import { sources, type Source, type NewSource } from "./source.schema.js";
+import { and, eq, isNull } from 'drizzle-orm';
+import type { DbClient } from '../../shared/db/index.js';
+import { firstOrNull, firstOrThrow } from '../../shared/db/utils.js';
+import { sources, type NewSource, type Source } from './source.schema.js';
 
-export class SourceRepository {
-  /** Retourne toutes les sources actives (soft-deleted exclues). */
+export interface SourceRepository {
+  findAll(): Promise<Source[]>;
+  findById(id: Source['id']): Promise<Source | null>;
+  insert(data: NewSource): Promise<Source>;
+  update(id: Source['id'], data: Partial<NewSource>): Promise<Source | null>;
+  /** `deletedBy` est tracé dans `updated_by`. */
+  softDelete(id: Source['id'], deletedBy: string | null): Promise<Source | null>;
+}
+
+/** Implémentation Drizzle. Toutes les lectures/écritures ignorent les sources soft-deleted. */
+export class DrizzleSourceRepository implements SourceRepository {
+  constructor(private readonly db: DbClient) {}
+
   async findAll(): Promise<Source[]> {
-    return db.select().from(sources).where(isNull(sources.deletedAt));
+    return this.db.select().from(sources).where(isNull(sources.deletedAt));
   }
 
-  /** Retourne une source par ID, ou null si non trouvée. */
-  async findById(id: Source["id"]): Promise<Source | null> {
-    const result = await db.select().from(sources).where(eq(sources.id, id));
-    return result[0] ?? null;
+  async findById(id: Source['id']): Promise<Source | null> {
+    const rows = await this.db
+      .select()
+      .from(sources)
+      .where(and(eq(sources.id, id), isNull(sources.deletedAt)))
+      .limit(1);
+    return firstOrNull(rows);
   }
 
-  /** Insère une nouvelle source et retourne l'entité créée. */
   async insert(data: NewSource): Promise<Source> {
-    const result = await db.insert(sources).values(data).returning();
-    return result[0];
+    const rows = await this.db.insert(sources).values(data).returning();
+    return firstOrThrow(rows);
   }
 
-  /** Met à jour les champs fournis et retourne l'entité modifiée. */
-  async update(
-    id: Source["id"],
-    data: Partial<NewSource>,
-  ): Promise<Source | null> {
-    const result = await db
+  async update(id: Source['id'], data: Partial<NewSource>): Promise<Source | null> {
+    const rows = await this.db
       .update(sources)
       .set(data)
-      .where(eq(sources.id, id))
+      .where(and(eq(sources.id, id), isNull(sources.deletedAt)))
       .returning();
-    return result[0] ?? null;
+    return firstOrNull(rows);
   }
 
-  /** Soft delete — marque la source comme supprimée sans la retirer de la DB. */
-  async softDelete(id: Source["id"]): Promise<Source | null> {
-    const result = await db
+  async softDelete(id: Source['id'], deletedBy: string | null): Promise<Source | null> {
+    const rows = await this.db
       .update(sources)
-      .set({ deletedAt: new Date() })
-      .where(eq(sources.id, id))
+      .set({ deletedAt: new Date(), updatedBy: deletedBy })
+      .where(and(eq(sources.id, id), isNull(sources.deletedAt)))
       .returning();
-    return result[0] ?? null;
+    return firstOrNull(rows);
   }
 }

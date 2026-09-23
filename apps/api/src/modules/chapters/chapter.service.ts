@@ -1,40 +1,37 @@
-import { AppError, NotFoundError } from '../../shared/lib/errors.js';
-import { ChapterRepository } from './chapter.repository.js';
+import { NotFoundError } from '../../shared/lib/errors.js';
+import type { ChapterRepository } from './chapter.repository.js';
+import type { Chapter } from './chapter.schema.js';
 import type { CreateChapterInput, UpdateChapterInput } from './chapter.validator.js';
 
 export class ChapterService {
-  constructor(private readonly repository = new ChapterRepository()) {}
+  constructor(private readonly repo: ChapterRepository) {}
 
-  async getAll() {
-    return await this.repository.findAll();
+  async getAll(): Promise<Chapter[]> {
+    return this.repo.findAll();
   }
 
-  async getByManhwaId(manhwaId: string) {
-    return await this.repository.findByManhwaId(manhwaId);
+  async getByManhwaId(manhwaId: Chapter['manhwaId']): Promise<Chapter[]> {
+    return this.repo.findByManhwaId(manhwaId);
   }
 
-  async getById(id: string) {
-    const chapter = await this.repository.findById(id);
-    if (!chapter) {
-      throw new NotFoundError('Chapter', id);
-    }
+  async getById(id: Chapter['id']): Promise<Chapter> {
+    const chapter = await this.repo.findById(id);
+    if (!chapter) throw new NotFoundError('Chapter', id);
     return chapter;
   }
 
-  async create(data: CreateChapterInput, userId?: string) {
-    return await this.repository.insert({
-      ...data,
-      createdBy: userId,
-    });
+  async create(data: CreateChapterInput, userId?: string): Promise<Chapter> {
+    return this.repo.insert({ ...data, createdBy: userId ?? null });
   }
 
-  async update(id: string, data: UpdateChapterInput, userId?: string) {
-    await this.getById(id);
-    return await this.repository.update(id, data);
+  async update(id: Chapter['id'], data: UpdateChapterInput, userId?: string): Promise<Chapter> {
+    const updated = await this.repo.update(id, { ...data, updatedBy: userId ?? null });
+    if (!updated) throw new NotFoundError('Chapter', id);
+    return updated;
   }
 
-  async delete(id: string, userId?: string) {
-    await this.getById(id);
-    await this.repository.softDelete(id);
+  async delete(id: Chapter['id'], userId?: string): Promise<void> {
+    const deleted = await this.repo.softDelete(id, userId ?? null);
+    if (!deleted) throw new NotFoundError('Chapter', id);
   }
 }

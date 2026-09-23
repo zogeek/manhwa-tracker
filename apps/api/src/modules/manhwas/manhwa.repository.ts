@@ -1,37 +1,54 @@
-import { eq, isNull } from "drizzle-orm";
-import { db } from "../../shared/db/index.js";
-import { manhwas, type Manhwa, type NewManhwa } from "./manhwa.schema.js";
+import { and, eq, isNull } from 'drizzle-orm';
+import type { DbClient } from '../../shared/db/index.js';
+import { firstOrNull, firstOrThrow } from '../../shared/db/utils.js';
+import { manhwas, type NewManhwa, type Manhwa } from './manhwa.schema.js';
 
-export class ManhwaRepository {
+export interface ManhwaRepository {
+  findAll(): Promise<Manhwa[]>;
+  findById(id: Manhwa['id']): Promise<Manhwa | null>;
+  insert(data: NewManhwa): Promise<Manhwa>;
+  update(id: Manhwa['id'], data: Partial<NewManhwa>): Promise<Manhwa | null>;
+  /** `deletedBy` est tracé dans `updated_by`. */
+  softDelete(id: Manhwa['id'], deletedBy: string | null): Promise<Manhwa | null>;
+}
+
+/** Implémentation Drizzle. Toutes les lectures/écritures ignorent les manhwas soft-deleted. */
+export class DrizzleManhwaRepository implements ManhwaRepository {
+  constructor(private readonly db: DbClient) {}
+
   async findAll(): Promise<Manhwa[]> {
-    return await db.select().from(manhwas).where(isNull(manhwas.deletedAt));
+    return this.db.select().from(manhwas).where(isNull(manhwas.deletedAt));
   }
 
-  async findById(id: Manhwa["id"]): Promise<Manhwa | null> {
-    const result = await db.select().from(manhwas).where(eq(manhwas.id, id));
-    return result[0] ?? null;
+  async findById(id: Manhwa['id']): Promise<Manhwa | null> {
+    const rows = await this.db
+      .select()
+      .from(manhwas)
+      .where(and(eq(manhwas.id, id), isNull(manhwas.deletedAt)))
+      .limit(1);
+    return firstOrNull(rows);
   }
 
   async insert(data: NewManhwa): Promise<Manhwa> {
-    const result = await db.insert(manhwas).values(data).returning();
-    return result[0];
+    const rows = await this.db.insert(manhwas).values(data).returning();
+    return firstOrThrow(rows);
   }
 
-  async update(id: Manhwa["id"], data: Partial<NewManhwa>): Promise<Manhwa | null> {
-    const result = await db
+  async update(id: Manhwa['id'], data: Partial<NewManhwa>): Promise<Manhwa | null> {
+    const rows = await this.db
       .update(manhwas)
       .set(data)
-      .where(eq(manhwas.id, id))
+      .where(and(eq(manhwas.id, id), isNull(manhwas.deletedAt)))
       .returning();
-    return result[0] ?? null;
+    return firstOrNull(rows);
   }
 
-  async softDelete(id: Manhwa["id"]): Promise<Manhwa | null> {
-    const result = await db
+  async softDelete(id: Manhwa['id'], deletedBy: string | null): Promise<Manhwa | null> {
+    const rows = await this.db
       .update(manhwas)
-      .set({ deletedAt: new Date() })
-      .where(eq(manhwas.id, id))
+      .set({ deletedAt: new Date(), updatedBy: deletedBy })
+      .where(and(eq(manhwas.id, id), isNull(manhwas.deletedAt)))
       .returning();
-    return result[0] ?? null;
+    return firstOrNull(rows);
   }
 }

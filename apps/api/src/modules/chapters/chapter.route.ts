@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
-import { zValidator } from '@hono/zod-validator';
-import { ChapterController } from './chapter.controller.js';
+import type { AppEnv } from '../../shared/http/types.js';
+import { validate } from '../../shared/http/validator.js';
+import type { ChapterController } from './chapter.controller.js';
 import {
   createChapterSchema,
   updateChapterSchema,
@@ -8,38 +9,16 @@ import {
   manhwaIdParamSchema,
 } from './chapter.validator.js';
 
-export const chapterRouter = new Hono();
-const controller = new ChapterController();
-
-chapterRouter.get('/', controller.getAll);
-
-chapterRouter.get(
-  '/manhwa/:manhwaId',
-  zValidator('param', manhwaIdParamSchema),
-  controller.getByManhwaId
-);
-
-chapterRouter.get(
-  '/:id',
-  zValidator('param', chapterIdParamSchema),
-  controller.getById
-);
-
-chapterRouter.post(
-  '/',
-  zValidator('json', createChapterSchema),
-  controller.create
-);
-
-chapterRouter.patch(
-  '/:id',
-  zValidator('param', chapterIdParamSchema),
-  zValidator('json', updateChapterSchema),
-  controller.update
-);
-
-chapterRouter.delete(
-  '/:id',
-  zValidator('param', chapterIdParamSchema),
-  controller.delete
-);
+export const createChapterRouter = (controller: ChapterController) =>
+  new Hono<AppEnv>()
+    .get('/', controller.getAll)
+    .get('/manhwa/:manhwaId', validate('param', manhwaIdParamSchema), controller.getByManhwaId)
+    .get('/:id', validate('param', chapterIdParamSchema), controller.getById)
+    .post('/', validate('json', createChapterSchema), controller.create)
+    .patch(
+      '/:id',
+      validate('param', chapterIdParamSchema),
+      validate('json', updateChapterSchema),
+      controller.update,
+    )
+    .delete('/:id', validate('param', chapterIdParamSchema), controller.delete);

@@ -1,67 +1,37 @@
 import type { Context } from 'hono';
-import { GenreService } from './genre.service.js';
+import type { AppEnv } from '../../shared/http/types.js';
+import type { GenreService } from './genre.service.js';
 
 export class GenreController {
-  constructor(private readonly genreService: GenreService) {}
+  constructor(private readonly service: GenreService) {}
 
-  getAll = async (c: Context) => {
-    try {
-      const genres = await this.genreService.getAll();
-      return c.json({ data: genres });
-    } catch (error) {
-      return this.handleError(c, error);
-    }
+  getAll = async (c: Context<AppEnv>) => {
+    const genres = await this.service.getAll();
+    return c.json({ data: genres });
   };
 
-  getById = async (c: Context) => {
-    try {
-      const { id } = c.req.valid('param' as never);
-      const genre = await this.genreService.getById(id);
-      return c.json({ data: genre });
-    } catch (error) {
-      return this.handleError(c, error);
-    }
+  getById = async (c: Context<AppEnv>) => {
+    const { id } = c.req.valid('param' as never);
+    const genre = await this.service.getById(id);
+    return c.json({ data: genre });
   };
 
-  create = async (c: Context) => {
-    try {
-      const data = c.req.valid('json' as never);
-      const genre = await this.genreService.create(data);
-      return c.json({ data: genre }, 201);
-    } catch (error) {
-      return this.handleError(c, error);
-    }
+  create = async (c: Context<AppEnv>) => {
+    const data = c.req.valid('json' as never);
+    const genre = await this.service.create(data);
+    return c.json({ data: genre }, 201);
   };
 
-  update = async (c: Context) => {
-    try {
-      const { id } = c.req.valid('param' as never);
-      const data = c.req.valid('json' as never);
-      const genre = await this.genreService.update(id, data);
-      return c.json({ data: genre });
-    } catch (error) {
-      return this.handleError(c, error);
-    }
+  update = async (c: Context<AppEnv>) => {
+    const { id } = c.req.valid('param' as never);
+    const data = c.req.valid('json' as never);
+    const genre = await this.service.update(id, data);
+    return c.json({ data: genre });
   };
 
-  delete = async (c: Context) => {
-    try {
-      const { id } = c.req.valid('param' as never);
-      await this.genreService.delete(id);
-      return c.body(null, 204);
-    } catch (error) {
-      return this.handleError(c, error);
-    }
+  delete = async (c: Context<AppEnv>) => {
+    const { id } = c.req.valid('param' as never);
+    await this.service.delete(id);
+    return c.body(null, 204);
   };
-
-  private handleError(c: Context, error: unknown) {
-    if (error && typeof error === 'object' && 'statusCode' in error) {
-      const status = (error as any).statusCode || 500;
-      const message = (error as any).message || 'Internal Server Error';
-      return c.json({ error: { message } }, status as any);
-    }
-    
-    console.error('Unhandled error:', error);
-    return c.json({ error: { message: 'Internal server error' } }, 500);
-  }
 }

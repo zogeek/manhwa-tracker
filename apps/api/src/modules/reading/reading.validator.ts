@@ -1,45 +1,48 @@
 import { z } from 'zod';
+import { chapterNumberSchema } from '../../shared/lib/validation.js';
+import { readingStatusEnum } from './reading.schema.js';
 
-export const readingStatusSchema = z.enum(['reading', 'completed', 'on_hold', 'dropped', 'plan_to_read']);
+// Dérivé de l'enum Postgres : une seule source de vérité.
+export const readingStatusSchema = z.enum(readingStatusEnum.enumValues);
 
 export const updateProgressSchema = z.object({
   status: readingStatusSchema,
-  currentChapter: z.number().int().min(0),
-  rating: z.number().int().min(1).max(10).optional(),
-  notes: z.string().optional(),
+  currentChapter: chapterNumberSchema,
+  rating: z.number().int().min(1).max(10),
+  notes: z.string().max(5_000),
 }).partial();
 
 export const logChapterReadSchema = z.object({
-  chapterId: z.string().uuid(),
-  sourceId: z.string().uuid().optional(),
-  readingTimeSeconds: z.number().int().positive().optional(),
+  chapterId: z.uuid(),
+  sourceId: z.uuid().optional(),
+  readingTimeSeconds: z.number().int().positive().max(86_400).optional(),
 });
 
 export const createReadingListSchema = z.object({
-  name: z.string().min(1),
-  description: z.string().optional(),
-  color: z.string().optional(),
-  icon: z.string().optional(),
+  name: z.string().trim().min(1).max(100),
+  description: z.string().max(1_000).optional(),
+  color: z.string().max(32).optional(),
+  icon: z.string().max(64).optional(),
 });
 
 export const updateReadingListSchema = createReadingListSchema.partial();
 
 export const addListItemSchema = z.object({
-  manhwaId: z.string().uuid(),
-  sortOrder: z.number().int().optional(),
+  manhwaId: z.uuid(),
+  sortOrder: z.number().int().nonnegative().optional(),
 });
 
 export const progressParamSchema = z.object({
-  manhwaId: z.string().uuid(),
+  manhwaId: z.uuid(),
 });
 
 export const readingListIdParamSchema = z.object({
-  id: z.string().uuid(),
+  id: z.uuid(),
 });
 
 export const listAndManhwaParamSchema = z.object({
-  id: z.string().uuid(),
-  manhwaId: z.string().uuid(),
+  id: z.uuid(),
+  manhwaId: z.uuid(),
 });
 
 export type UpdateProgressInput = z.infer<typeof updateProgressSchema>;

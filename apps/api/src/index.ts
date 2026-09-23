@@ -1,43 +1,34 @@
 import { serve } from '@hono/node-server';
-import { Hono } from 'hono';
-import { cors } from 'hono/cors';
-import { sourceRouter } from './modules/sources/source.route.js';
-import { manhwaRouter } from './modules/manhwas/manhwa.route.js';
-import { chapterRouter } from './modules/chapters/chapter.route.js';
-import { genresRouter as genreRouter } from './modules/genres/genre.route.js';
-import { readingRouter } from './modules/reading/reading.route.js';
+import { createApp } from './app.js';
+import { createContainer } from './container.js';
+import { loadEnv } from './shared/config/env.js';
+import { createDatabase } from './shared/db/index.js';
 
-const app = new Hono();
+export type { AppType } from './app.js';
 
-app.use(
-  '*',
-  cors({
-    origin: 'http://localhost:3000',
-    credentials: true,
-  }),
-);
-
-app.onError((err, c) => {
-  console.error('[UNHANDLED_ERROR]', err.message, err.stack);
-  return c.json({ error: 'Internal server error' }, 500);
+const env = loadEnv();
+const database = createDatabase(env.DATABASE_URL);
+const app = createApp({
+  container: createContainer(database.db),
+  corsOrigins: env.CORS_ORIGINS,
 });
 
-const routes = app
-  .get('/health', (c) => c.json({ status: 'OK' }))
-  .route('/sources', sourceRouter)
-  .route('/manhwas', manhwaRouter)
-  .route('/chapters', chapterRouter)
-  .route('/genres', genreRouter)
-  .route('/reading', readingRouter);
+const server = serve({ fetch: app.fetch, port: env.PORT }, (info) => {
+  console.log(`API listening on http://localhost:${info.port} (${env.NODE_ENV})`);
+});
 
-serve(
-  {
-    fetch: app.fetch,
-    port: 3001,
-  },
-  (info) => {
-    console.log(`Server is running on http://localhost:${info.port}`);
-  },
-);
+function shutdown(signal: NodeJS.Signals): void {
+  console.log(`${signal} received, shutting down…`);
+  server.close(() => {
+    database
+      .close()
+      .then(() => process.exit(0))
+      .catch((error: unknown) => {
+        console.error('Failed to close the database pool', error);
+        process.exit(1);
+      });
+  });
+}
 
-export type AppType = typeof routes;
+process.once('SIGINT', shutdown);
+process.once('SIGTERM', shutdown);

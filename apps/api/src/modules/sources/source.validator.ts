@@ -3,11 +3,13 @@ import { z } from 'zod';
 import { sources } from './source.schema.js';
 
 export const createSourceSchema = createInsertSchema(sources, {
-  name: z.string().min(1, 'Le nom est requis'),
+  name: z.string().trim().min(1, 'Le nom est requis').max(200),
   baseUrl: z.url('URL invalide'),
+  iconUrl: z.url('URL invalide').nullish(),
 }).omit({
   id: true,
   createdAt: true,
+  updatedAt: true,
   createdBy: true,
   updatedBy: true,
   deletedAt: true,

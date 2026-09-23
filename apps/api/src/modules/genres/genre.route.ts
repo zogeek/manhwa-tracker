@@ -1,42 +1,22 @@
 import { Hono } from 'hono';
-import { zValidator } from '@hono/zod-validator';
-import { GenreController } from './genre.controller.js';
-import { GenreService } from './genre.service.js';
-import { GenreRepository } from './genre.repository.js';
-import { createGenreSchema, updateGenreSchema, genreIdParamSchema } from './genre.validator.js';
+import type { AppEnv } from '../../shared/http/types.js';
+import { validate } from '../../shared/http/validator.js';
+import type { GenreController } from './genre.controller.js';
+import {
+  createGenreSchema,
+  updateGenreSchema,
+  genreIdParamSchema,
+} from './genre.validator.js';
 
-export const genresRouter = new Hono();
-
-const repository = new GenreRepository();
-const service = new GenreService(repository);
-const controller = new GenreController(service);
-
-genresRouter.get(
-  '/',
-  controller.getAll
-);
-
-genresRouter.get(
-  '/:id',
-  zValidator('param', genreIdParamSchema),
-  controller.getById
-);
-
-genresRouter.post(
-  '/',
-  zValidator('json', createGenreSchema),
-  controller.create
-);
-
-genresRouter.patch(
-  '/:id',
-  zValidator('param', genreIdParamSchema),
-  zValidator('json', updateGenreSchema),
-  controller.update
-);
-
-genresRouter.delete(
-  '/:id',
-  zValidator('param', genreIdParamSchema),
-  controller.delete
-);
+export const createGenreRouter = (controller: GenreController) =>
+  new Hono<AppEnv>()
+    .get('/', controller.getAll)
+    .get('/:id', validate('param', genreIdParamSchema), controller.getById)
+    .post('/', validate('json', createGenreSchema), controller.create)
+    .patch(
+      '/:id',
+      validate('param', genreIdParamSchema),
+      validate('json', updateGenreSchema),
+      controller.update,
+    )
+    .delete('/:id', validate('param', genreIdParamSchema), controller.delete);

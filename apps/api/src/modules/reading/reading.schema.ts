@@ -1,6 +1,13 @@
 import type { InferInsertModel, InferSelectModel } from 'drizzle-orm';
-export { readingProgress, chapterReads, readingLists, readingListItems } from '../../shared/db/schema.js';
-import { readingProgress, chapterReads, readingLists, readingListItems } from '../../shared/db/schema.js';
+import {
+  readingProgress,
+  chapterReads,
+  readingLists,
+  readingListItems,
+  readingStatusEnum,
+} from '../../shared/db/schema.js';
+
+export { readingProgress, chapterReads, readingLists, readingListItems, readingStatusEnum };
 
 export type ReadingProgress = InferSelectModel<typeof readingProgress>;
 export type NewReadingProgress = InferInsertModel<typeof readingProgress>;

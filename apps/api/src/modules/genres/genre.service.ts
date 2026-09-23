@@ -1,52 +1,34 @@
-import { NotFoundError, ConflictError } from '../../shared/lib/errors.js';
-import { GenreRepository } from './genre.repository.js';
+import { NotFoundError } from '../../shared/lib/errors.js';
+import type { GenreRepository } from './genre.repository.js';
 import type { Genre } from './genre.schema.js';
 import type { CreateGenreInput, UpdateGenreInput } from './genre.validator.js';
 
+// L'unicité du slug est garantie par l'index `genres_slug_idx` : une violation remonte en 409 via le handler global.
 export class GenreService {
-  constructor(private readonly genreRepository: GenreRepository) {}
+  constructor(private readonly repo: GenreRepository) {}
 
   async getAll(): Promise<Genre[]> {
-    return this.genreRepository.findAll();
+    return this.repo.findAll();
   }
 
-  async getById(id: string): Promise<Genre> {
-    const genre = await this.genreRepository.findById(id);
-    if (!genre) {
-      throw new NotFoundError('Genre', id);
-    }
+  async getById(id: Genre['id']): Promise<Genre> {
+    const genre = await this.repo.findById(id);
+    if (!genre) throw new NotFoundError('Genre', id);
     return genre;
   }
 
   async create(data: CreateGenreInput): Promise<Genre> {
-    const existing = await this.genreRepository.findBySlug(data.slug);
-    if (existing) {
-      throw new ConflictError('Genre with this slug already exists');
-    }
-    return this.genreRepository.insert(data);
+    return this.repo.insert(data);
   }
 
-  async update(id: string, data: UpdateGenreInput): Promise<Genre> {
-    const genre = await this.genreRepository.findById(id);
-    if (!genre) {
-      throw new NotFoundError('Genre', id);
-    }
-
-    if (data.slug && data.slug !== genre.slug) {
-      const existing = await this.genreRepository.findBySlug(data.slug);
-      if (existing) {
-        throw new ConflictError('Genre with this slug already exists');
-      }
-    }
-
-    return this.genreRepository.update(id, data);
+  async update(id: Genre['id'], data: UpdateGenreInput): Promise<Genre> {
+    const updated = await this.repo.update(id, data);
+    if (!updated) throw new NotFoundError('Genre', id);
+    return updated;
   }
 
-  async delete(id: string): Promise<void> {
-    const genre = await this.genreRepository.findById(id);
-    if (!genre) {
-      throw new NotFoundError('Genre', id);
-    }
-    await this.genreRepository.remove(id);
+  async delete(id: Genre['id']): Promise<void> {
+    const removed = await this.repo.remove(id);
+    if (!removed) throw new NotFoundError('Genre', id);
   }
 }

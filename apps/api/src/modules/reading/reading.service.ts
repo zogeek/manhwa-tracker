@@ -1,101 +1,106 @@
 import { NotFoundError } from '../../shared/lib/errors.js';
-import { ReadingRepository } from './reading.repository.js';
-import type { LogChapterReadInput, UpdateProgressInput, CreateReadingListInput, UpdateReadingListInput, AddListItemInput } from './reading.validator.js';
+import type { ReadingRepository } from './reading.repository.js';
+import type {
+  ChapterRead,
+  ReadingList,
+  ReadingListItem,
+  ReadingProgress,
+} from './reading.schema.js';
+import type {
+  AddListItemInput,
+  CreateReadingListInput,
+  LogChapterReadInput,
+  UpdateProgressInput,
+  UpdateReadingListInput,
+} from './reading.validator.js';
 
 export class ReadingService {
-  private repository: ReadingRepository;
+  constructor(private readonly repo: ReadingRepository) {}
 
-  constructor() {
-    this.repository = new ReadingRepository();
+  async getProgress(userId: string, manhwaId: string): Promise<ReadingProgress | null> {
+    return this.repo.findProgressByUserAndManhwa(userId, manhwaId);
   }
 
-  async getProgress(userId: string, manhwaId: string) {
-    return this.repository.findProgressByUserAndManhwa(userId, manhwaId);
+  async getAllProgress(userId: string): Promise<ReadingProgress[]> {
+    return this.repo.findAllProgressByUser(userId);
   }
 
-  async getAllProgress(userId: string) {
-    return this.repository.findAllProgressByUser(userId);
-  }
+  async updateProgress(userId: string, manhwaId: string, data: UpdateProgressInput): Promise<ReadingProgress> {
+    const current = await this.getProgress(userId, manhwaId);
+    const currentChapter = data.currentChapter ?? current?.currentChapter ?? 0;
 
-  async updateProgress(userId: string, manhwaId: string, data: UpdateProgressInput) {
-    const currentProgress = await this.getProgress(userId, manhwaId);
-    return this.repository.upsertProgress({
+    return this.repo.upsertProgress({
       userId,
       manhwaId,
-      status: data.status || currentProgress?.status || 'plan_to_read',
-      currentChapter: data.currentChapter ?? currentProgress?.currentChapter ?? 0,
-      furthestChapter: currentProgress?.furthestChapter 
-        ? Math.max(currentProgress.furthestChapter, data.currentChapter ?? 0)
-        : (data.currentChapter ?? 0),
-      rating: data.rating !== undefined ? data.rating : currentProgress?.rating,
-      notes: data.notes !== undefined ? data.notes : currentProgress?.notes,
+      status: data.status ?? current?.status ?? 'plan_to_read',
+      currentChapter,
+      furthestChapter: Math.max(current?.furthestChapter ?? 0, currentChapter),
+      rating: data.rating ?? current?.rating ?? null,
+      notes: data.notes ?? current?.notes ?? null,
       updatedBy: userId,
     });
   }
 
-  async logRead(userId: string, data: LogChapterReadInput) {
-    const read = await this.repository.insertRead({
+  async logRead(userId: string, data: LogChapterReadInput): Promise<ChapterRead> {
+    return this.repo.insertRead({
       userId,
       chapterId: data.chapterId,
-      sourceId: data.sourceId,
-      readingTimeSeconds: data.readingTimeSeconds,
+      sourceId: data.sourceId ?? null,
+      readingTimeSeconds: data.readingTimeSeconds ?? null,
     });
-    return read;
   }
 
-  async getReadHistory(userId: string, manhwaId?: string) {
+  async getReadHistory(userId: string, manhwaId?: string): Promise<ChapterRead[]> {
     if (manhwaId) {
-      return this.repository.findReadsByUserAndManhwa(userId, manhwaId);
+      return this.repo.findReadsByUserAndManhwa(userId, manhwaId);
     }
-    return this.repository.findReadsByUser(userId);
+    return this.repo.findReadsByUser(userId);
   }
 
-  async getUserLists(userId: string) {
-    return this.repository.findAllListsByUser(userId);
+  async getUserLists(userId: string): Promise<ReadingList[]> {
+    return this.repo.findAllListsByUser(userId);
   }
 
-  async getListById(id: string) {
-    const list = await this.repository.findListById(id);
-    if (!list) {
-      throw new NotFoundError('ReadingList', id);
-    }
+  async getListById(id: string): Promise<ReadingList> {
+    const list = await this.repo.findListById(id);
+    if (!list) throw new NotFoundError('ReadingList', id);
     return list;
   }
 
-  async createList(userId: string, data: CreateReadingListInput) {
-    return this.repository.insertList({
-      ...data,
-      userId,
-    });
+  async createList(userId: string, data: CreateReadingListInput): Promise<ReadingList> {
+    return this.repo.insertList({ ...data, userId });
   }
 
-  async updateList(id: string, data: UpdateReadingListInput, userId?: string) {
+  // TODO(étape 4) : contrôle de propriété obligatoire sur toutes les opérations de liste (IDOR).
+  async updateList(id: string, data: UpdateReadingListInput, userId?: string): Promise<ReadingList> {
     const list = await this.getListById(id);
-    if (userId && list.userId !== userId) {
-      throw new NotFoundError('ReadingList', id);
-    }
-    return this.repository.updateList(id, data);
+    if (userId && list.userId !== userId) throw new NotFoundError('ReadingList', id);
+
+    const updated = await this.repo.updateList(id, data);
+    if (!updated) throw new NotFoundError('ReadingList', id);
+    return updated;
   }
 
-  async deleteList(id: string, userId?: string) {
+  async deleteList(id: string, userId?: string): Promise<void> {
     const list = await this.getListById(id);
-    if (userId && list.userId !== userId) {
-      throw new NotFoundError('ReadingList', id);
-    }
-    return this.repository.softDeleteList(id);
+    if (userId && list.userId !== userId) throw new NotFoundError('ReadingList', id);
+
+    const deleted = await this.repo.softDeleteList(id);
+    if (!deleted) throw new NotFoundError('ReadingList', id);
   }
 
-  async addToList(listId: string, data: AddListItemInput) {
+  async addToList(listId: string, data: AddListItemInput): Promise<ReadingListItem> {
     await this.getListById(listId);
-    return this.repository.insertListItem({
+    return this.repo.insertListItem({
       listId,
       manhwaId: data.manhwaId,
       sortOrder: data.sortOrder,
     });
   }
 
-  async removeFromList(listId: string, manhwaId: string) {
+  async removeFromList(listId: string, manhwaId: string): Promise<void> {
     await this.getListById(listId);
-    return this.repository.deleteListItem(listId, manhwaId);
+    const removed = await this.repo.deleteListItem(listId, manhwaId);
+    if (!removed) throw new NotFoundError('ReadingListItem', manhwaId);
   }
 }

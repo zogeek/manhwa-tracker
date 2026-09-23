@@ -1,27 +1,59 @@
-import { and, desc, eq, isNull } from 'drizzle-orm';
-import { db } from '../../shared/db/index.js';
-import { readingProgress, chapterReads, readingLists, readingListItems, chapters } from '../../shared/db/schema.js';
-import type { NewReadingProgress, NewChapterRead, NewReadingList, NewReadingListItem } from './reading.schema.js';
+import { and, asc, desc, eq, getTableColumns, isNull } from 'drizzle-orm';
+import type { DbClient } from '../../shared/db/index.js';
+import { chapters } from '../../shared/db/schema.js';
+import { firstOrNull, firstOrThrow } from '../../shared/db/utils.js';
+import {
+  chapterReads,
+  readingListItems,
+  readingLists,
+  readingProgress,
+  type ChapterRead,
+  type NewChapterRead,
+  type NewReadingList,
+  type NewReadingListItem,
+  type NewReadingProgress,
+  type ReadingList,
+  type ReadingListItem,
+  type ReadingProgress,
+} from './reading.schema.js';
 
-export class ReadingRepository {
-  async findProgressByUserAndManhwa(userId: string, manhwaId: string) {
-    const result = await db
+export interface ReadingRepository {
+  findProgressByUserAndManhwa(userId: string, manhwaId: string): Promise<ReadingProgress | null>;
+  findAllProgressByUser(userId: string): Promise<ReadingProgress[]>;
+  upsertProgress(data: NewReadingProgress): Promise<ReadingProgress>;
+  insertRead(data: NewChapterRead): Promise<ChapterRead>;
+  findReadsByUser(userId: string): Promise<ChapterRead[]>;
+  findReadsByUserAndManhwa(userId: string, manhwaId: string): Promise<ChapterRead[]>;
+  findAllListsByUser(userId: string): Promise<ReadingList[]>;
+  findListById(id: string): Promise<ReadingList | null>;
+  insertList(data: NewReadingList): Promise<ReadingList>;
+  updateList(id: string, data: Partial<NewReadingList>): Promise<ReadingList | null>;
+  softDeleteList(id: string): Promise<ReadingList | null>;
+  insertListItem(data: NewReadingListItem): Promise<ReadingListItem>;
+  deleteListItem(listId: string, manhwaId: string): Promise<ReadingListItem | null>;
+}
+
+export class DrizzleReadingRepository implements ReadingRepository {
+  constructor(private readonly db: DbClient) {}
+
+  async findProgressByUserAndManhwa(userId: string, manhwaId: string): Promise<ReadingProgress | null> {
+    const rows = await this.db
       .select()
       .from(readingProgress)
       .where(and(eq(readingProgress.userId, userId), eq(readingProgress.manhwaId, manhwaId)))
       .limit(1);
-    return result[0] || null;
+    return firstOrNull(rows);
   }
 
-  async findAllProgressByUser(userId: string) {
-    return db
+  async findAllProgressByUser(userId: string): Promise<ReadingProgress[]> {
+    return this.db
       .select()
       .from(readingProgress)
       .where(eq(readingProgress.userId, userId));
   }
 
-  async upsertProgress(data: NewReadingProgress) {
-    const result = await db
+  async upsertProgress(data: NewReadingProgress): Promise<ReadingProgress> {
+    const rows = await this.db
       .insert(readingProgress)
       .values(data)
       .onConflictDoUpdate({
@@ -39,114 +71,81 @@ export class ReadingRepository {
         },
       })
       .returning();
-    return result[0];
+    return firstOrThrow(rows);
   }
 
-  async updateProgress(userId: string, manhwaId: string, data: Partial<NewReadingProgress>) {
-    const result = await db
-      .update(readingProgress)
-      .set({ ...data, updatedAt: new Date() })
-      .where(and(eq(readingProgress.userId, userId), eq(readingProgress.manhwaId, manhwaId)))
-      .returning();
-    return result[0] || null;
+  async insertRead(data: NewChapterRead): Promise<ChapterRead> {
+    const rows = await this.db.insert(chapterReads).values(data).returning();
+    return firstOrThrow(rows);
   }
 
-  async insertRead(data: NewChapterRead) {
-    const result = await db
-      .insert(chapterReads)
-      .values(data)
-      .returning();
-    return result[0];
-  }
-
-  async findReadsByUser(userId: string) {
-    return db
+  async findReadsByUser(userId: string): Promise<ChapterRead[]> {
+    return this.db
       .select()
       .from(chapterReads)
       .where(eq(chapterReads.userId, userId))
       .orderBy(desc(chapterReads.readAt));
   }
 
-  async findReadsByUserAndManhwa(userId: string, manhwaId: string) {
-    return db
-      .select({
-        id: chapterReads.id,
-        userId: chapterReads.userId,
-        chapterId: chapterReads.chapterId,
-        sourceId: chapterReads.sourceId,
-        readAt: chapterReads.readAt,
-        readingTimeSeconds: chapterReads.readingTimeSeconds,
-      })
+  async findReadsByUserAndManhwa(userId: string, manhwaId: string): Promise<ChapterRead[]> {
+    return this.db
+      .select(getTableColumns(chapterReads))
       .from(chapterReads)
       .innerJoin(chapters, eq(chapterReads.chapterId, chapters.id))
       .where(and(eq(chapterReads.userId, userId), eq(chapters.manhwaId, manhwaId)))
       .orderBy(desc(chapterReads.readAt));
   }
 
-  async findAllListsByUser(userId: string) {
-    return db
+  async findAllListsByUser(userId: string): Promise<ReadingList[]> {
+    return this.db
       .select()
       .from(readingLists)
       .where(and(eq(readingLists.userId, userId), isNull(readingLists.deletedAt)))
-      .orderBy(readingLists.sortOrder);
+      .orderBy(asc(readingLists.sortOrder));
   }
 
-  async findListById(id: string) {
-    const result = await db
+  async findListById(id: string): Promise<ReadingList | null> {
+    const rows = await this.db
       .select()
       .from(readingLists)
       .where(and(eq(readingLists.id, id), isNull(readingLists.deletedAt)))
       .limit(1);
-    return result[0] || null;
+    return firstOrNull(rows);
   }
 
-  async insertList(data: NewReadingList) {
-    const result = await db
-      .insert(readingLists)
-      .values(data)
-      .returning();
-    return result[0];
+  async insertList(data: NewReadingList): Promise<ReadingList> {
+    const rows = await this.db.insert(readingLists).values(data).returning();
+    return firstOrThrow(rows);
   }
 
-  async updateList(id: string, data: Partial<NewReadingList>) {
-    const result = await db
+  async updateList(id: string, data: Partial<NewReadingList>): Promise<ReadingList | null> {
+    const rows = await this.db
       .update(readingLists)
-      .set({ ...data, updatedAt: new Date() })
-      .where(eq(readingLists.id, id))
+      .set(data)
+      .where(and(eq(readingLists.id, id), isNull(readingLists.deletedAt)))
       .returning();
-    return result[0] || null;
+    return firstOrNull(rows);
   }
 
-  async softDeleteList(id: string) {
-    const result = await db
+  async softDeleteList(id: string): Promise<ReadingList | null> {
+    const rows = await this.db
       .update(readingLists)
       .set({ deletedAt: new Date() })
-      .where(eq(readingLists.id, id))
+      .where(and(eq(readingLists.id, id), isNull(readingLists.deletedAt)))
       .returning();
-    return result[0] || null;
+    return firstOrNull(rows);
   }
 
-  async findListItems(listId: string) {
-    return db
-      .select()
-      .from(readingListItems)
-      .where(eq(readingListItems.listId, listId))
-      .orderBy(readingListItems.sortOrder);
+  async insertListItem(data: NewReadingListItem): Promise<ReadingListItem> {
+    const rows = await this.db.insert(readingListItems).values(data).returning();
+    return firstOrThrow(rows);
   }
 
-  async insertListItem(data: NewReadingListItem) {
-    const result = await db
-      .insert(readingListItems)
-      .values(data)
-      .returning();
-    return result[0];
-  }
-
-  async deleteListItem(listId: string, manhwaId: string) {
-    const result = await db
+  async deleteListItem(listId: string, manhwaId: string): Promise<ReadingListItem | null> {
+    const rows = await this.db
       .delete(readingListItems)
       .where(and(eq(readingListItems.listId, listId), eq(readingListItems.manhwaId, manhwaId)))
       .returning();
-    return result[0] || null;
+    return firstOrNull(rows);
   }
 }

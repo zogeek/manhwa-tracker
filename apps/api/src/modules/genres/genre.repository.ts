@@ -1,53 +1,41 @@
-import { eq } from 'drizzle-orm';
-import { db } from '../../shared/db/index.js';
-import { genres } from './genre.schema.js';
-import type { Genre, NewGenre } from './genre.schema.js';
+import { asc, eq } from 'drizzle-orm';
+import type { DbClient } from '../../shared/db/index.js';
+import { firstOrNull, firstOrThrow } from '../../shared/db/utils.js';
+import { genres, type Genre, type NewGenre } from './genre.schema.js';
 
-export class GenreRepository {
+export interface GenreRepository {
+  findAll(): Promise<Genre[]>;
+  findById(id: Genre['id']): Promise<Genre | null>;
+  insert(data: NewGenre): Promise<Genre>;
+  update(id: Genre['id'], data: Partial<NewGenre>): Promise<Genre | null>;
+  /** Hard delete : les liaisons `manhwa_genres` partent en cascade. */
+  remove(id: Genre['id']): Promise<Genre | null>;
+}
+
+export class DrizzleGenreRepository implements GenreRepository {
+  constructor(private readonly db: DbClient) {}
+
   async findAll(): Promise<Genre[]> {
-    return db.select().from(genres);
+    return this.db.select().from(genres).orderBy(asc(genres.name));
   }
 
-  async findById(id: string): Promise<Genre | null> {
-    const [result] = await db
-      .select()
-      .from(genres)
-      .where(eq(genres.id, id));
-
-    return result || null;
+  async findById(id: Genre['id']): Promise<Genre | null> {
+    const rows = await this.db.select().from(genres).where(eq(genres.id, id)).limit(1);
+    return firstOrNull(rows);
   }
 
-  async findBySlug(slug: string): Promise<Genre | null> {
-    const [result] = await db
-      .select()
-      .from(genres)
-      .where(eq(genres.slug, slug));
-
-    return result || null;
+  async insert(data: NewGenre): Promise<Genre> {
+    const rows = await this.db.insert(genres).values(data).returning();
+    return firstOrThrow(rows);
   }
 
-  async insert(data: Omit<NewGenre, 'id'>): Promise<Genre> {
-    const [result] = await db
-      .insert(genres)
-      .values(data)
-      .returning();
-
-    return result!;
+  async update(id: Genre['id'], data: Partial<NewGenre>): Promise<Genre | null> {
+    const rows = await this.db.update(genres).set(data).where(eq(genres.id, id)).returning();
+    return firstOrNull(rows);
   }
 
-  async update(id: string, data: Partial<Omit<NewGenre, 'id'>>): Promise<Genre> {
-    const [result] = await db
-      .update(genres)
-      .set(data)
-      .where(eq(genres.id, id))
-      .returning();
-
-    return result!;
-  }
-
-  async remove(id: string): Promise<void> {
-    await db
-      .delete(genres)
-      .where(eq(genres.id, id));
+  async remove(id: Genre['id']): Promise<Genre | null> {
+    const rows = await this.db.delete(genres).where(eq(genres.id, id)).returning();
+    return firstOrNull(rows);
   }
 }

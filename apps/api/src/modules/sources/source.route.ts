@@ -1,23 +1,22 @@
 import { Hono } from 'hono';
-import { zValidator } from '@hono/zod-validator';
-import { SourceController } from './source.controller.js';
+import type { AppEnv } from '../../shared/http/types.js';
+import { validate } from '../../shared/http/validator.js';
+import type { SourceController } from './source.controller.js';
 import {
   createSourceSchema,
   updateSourceSchema,
   sourceIdParamSchema,
 } from './source.validator.js';
 
-const controller = new SourceController();
-
-const sourceRouter = new Hono()
-  .get('/', controller.getAll)
-  .get('/:id', zValidator('param', sourceIdParamSchema), controller.getById)
-  .post('/', zValidator('json', createSourceSchema), controller.create)
-  .patch('/:id',
-    zValidator('param', sourceIdParamSchema),
-    zValidator('json', updateSourceSchema),
-    controller.update,
-  )
-  .delete('/:id', zValidator('param', sourceIdParamSchema), controller.delete);
-
-export { sourceRouter };
+export const createSourceRouter = (controller: SourceController) =>
+  new Hono<AppEnv>()
+    .get('/', controller.getAll)
+    .get('/:id', validate('param', sourceIdParamSchema), controller.getById)
+    .post('/', validate('json', createSourceSchema), controller.create)
+    .patch(
+      '/:id',
+      validate('param', sourceIdParamSchema),
+      validate('json', updateSourceSchema),
+      controller.update,
+    )
+    .delete('/:id', validate('param', sourceIdParamSchema), controller.delete);

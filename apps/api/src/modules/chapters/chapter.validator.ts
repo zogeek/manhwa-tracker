@@ -1,27 +1,31 @@
-import { z } from 'zod';
 import { createInsertSchema } from 'drizzle-zod';
+import { z } from 'zod';
+import { chapterNumberSchema } from '../../shared/lib/validation.js';
 import { chapters } from './chapter.schema.js';
 
-export const createChapterSchema = createInsertSchema(chapters)
-  .omit({
-    id: true,
-    createdAt: true,
-    createdBy: true,
-    deletedAt: true,
-  })
-  .extend({
-    manhwaId: z.string().uuid(),
-    number: z.number().int().positive(),
-  });
+export const createChapterSchema = createInsertSchema(chapters, {
+  manhwaId: z.uuid(),
+  number: chapterNumberSchema,
+  title: z.string().trim().max(500).nullish(),
+  releaseDate: z.iso.date().nullish(),
+}).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  createdBy: true,
+  updatedBy: true,
+  deletedAt: true,
+});
 
-export const updateChapterSchema = createChapterSchema.partial();
+// Un chapitre ne change pas de manhwa.
+export const updateChapterSchema = createChapterSchema.omit({ manhwaId: true }).partial();
 
 export const chapterIdParamSchema = z.object({
-  id: z.string().uuid(),
+  id: z.uuid(),
 });
 
 export const manhwaIdParamSchema = z.object({
-  manhwaId: z.string().uuid(),
+  manhwaId: z.uuid(),
 });
 
 export type CreateChapterInput = z.infer<typeof createChapterSchema>;
