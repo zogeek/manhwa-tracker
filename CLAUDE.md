@@ -68,3 +68,9 @@ Les fichiers de test vivent à côté du code (`*.spec.ts`) et sont exclus du bu
 3. **`drizzle-zod`** : tout validator dérive de `createInsertSchema(table).omit(...)`, interdiction de dupliquer un schema Zod à la main s'il existe déjà une table Drizzle correspondante.
 4. Avant de créer une nouvelle table, vérifier `shared/db/schema.ts` — ne jamais dupliquer une relation déjà couverte par une table pivot existante.
 5. `.env.example` doit être mis à jour à chaque nouvelle variable d'environnement ajoutée (Better Auth secret, DB pivot, clé scraper...).
+
+# 🗣️ COMMUNICATION & PÉDAGOGIE
+Le développeur superviseur a besoin de clarté.
+1. **Vulgarise tes résumés.** Concentre-toi sur la valeur concrète (ce que ça change pour l'application et les utilisateurs) plutôt que sur la théorie pure.
+2. **Explique le jargon.** Si tu dois absolument utiliser un terme technique pointu (ex: IDOR, RPC, transaction atomique, IoC, Rebase), définis-le en une phrase simple, si possible avec une métaphore de la vie quotidienne.
+3. Sois direct, pédagogique et bienveillant dans tes explications.
