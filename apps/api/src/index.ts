@@ -9,7 +9,7 @@ export type { AppType } from './app.js';
 const env = loadEnv();
 const database = createDatabase(env.DATABASE_URL);
 const app = createApp({
-  container: createContainer(database.db),
+  services: createContainer(database.db).services,
   corsOrigins: env.CORS_ORIGINS,
 });
 

@@ -3,23 +3,21 @@ import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 import { requestId } from 'hono/request-id';
 import { secureHeaders } from 'hono/secure-headers';
-import type { Container } from './container.js';
-import { createChapterRouter } from './modules/chapters/chapter.route.js';
-import { createGenreRouter } from './modules/genres/genre.route.js';
-import { createManhwaRouter } from './modules/manhwas/manhwa.route.js';
-import { createReadingRouter } from './modules/reading/reading.route.js';
-import { createSourceRouter } from './modules/sources/source.route.js';
+import type { Services } from './container.js';
+import { createChapterRoutes } from './modules/chapters/chapter.route.js';
+import { createGenreRoutes } from './modules/genres/genre.route.js';
+import { createManhwaRoutes } from './modules/manhwas/manhwa.route.js';
+import { createReadingRoutes } from './modules/reading/reading.route.js';
+import { createSourceRoutes } from './modules/sources/source.route.js';
 import { errorHandler, notFoundHandler } from './shared/http/error-handler.js';
 import type { AppEnv } from './shared/http/types.js';
 
 export type AppOptions = {
-  container: Container;
+  services: Services;
   corsOrigins: string[];
 };
 
-export function createApp({ container, corsOrigins }: AppOptions) {
-  const { controllers } = container;
-
+export function createApp({ services, corsOrigins }: AppOptions) {
   const app = new Hono<AppEnv>()
     .use(requestId())
     .use(logger())
@@ -31,11 +29,11 @@ export function createApp({ container, corsOrigins }: AppOptions) {
 
   return app
     .get('/health', (c) => c.json({ status: 'ok' }))
-    .route('/sources', createSourceRouter(controllers.sources))
-    .route('/manhwas', createManhwaRouter(controllers.manhwas))
-    .route('/chapters', createChapterRouter(controllers.chapters))
-    .route('/genres', createGenreRouter(controllers.genres))
-    .route('/reading', createReadingRouter(controllers.reading));
+    .route('/sources', createSourceRoutes(services.sources))
+    .route('/manhwas', createManhwaRoutes(services.manhwas))
+    .route('/chapters', createChapterRoutes(services.chapters))
+    .route('/genres', createGenreRoutes(services.genres))
+    .route('/reading', createReadingRoutes(services.reading));
 }
 
 export type AppType = ReturnType<typeof createApp>;

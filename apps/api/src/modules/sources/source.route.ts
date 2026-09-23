@@ -1,22 +1,40 @@
 import { Hono } from 'hono';
 import type { AppEnv } from '../../shared/http/types.js';
 import { validate } from '../../shared/http/validator.js';
-import type { SourceController } from './source.controller.js';
+import type { SourceService } from './source.service.js';
 import {
   createSourceSchema,
   updateSourceSchema,
   sourceIdParamSchema,
 } from './source.validator.js';
 
-export const createSourceRouter = (controller: SourceController) =>
+export const createSourceRoutes = (service: SourceService) =>
   new Hono<AppEnv>()
-    .get('/', controller.getAll)
-    .get('/:id', validate('param', sourceIdParamSchema), controller.getById)
-    .post('/', validate('json', createSourceSchema), controller.create)
+    .get('/', async (c) => {
+      const sources = await service.getAll();
+      return c.json({ data: sources }, 200);
+    })
+    .get('/:id', validate('param', sourceIdParamSchema), async (c) => {
+      const { id } = c.req.valid('param');
+      const source = await service.getById(id);
+      return c.json({ data: source }, 200);
+    })
+    .post('/', validate('json', createSourceSchema), async (c) => {
+      const source = await service.create(c.req.valid('json'), c.get('userId'));
+      return c.json({ data: source }, 201);
+    })
     .patch(
       '/:id',
       validate('param', sourceIdParamSchema),
       validate('json', updateSourceSchema),
-      controller.update,
+      async (c) => {
+        const { id } = c.req.valid('param');
+        const source = await service.update(id, c.req.valid('json'), c.get('userId'));
+        return c.json({ data: source }, 200);
+      },
     )
-    .delete('/:id', validate('param', sourceIdParamSchema), controller.delete);
+    .delete('/:id', validate('param', sourceIdParamSchema), async (c) => {
+      const { id } = c.req.valid('param');
+      await service.delete(id, c.get('userId'));
+      return c.body(null, 204);
+    });
