@@ -8,8 +8,17 @@ export type { AppType } from './app.js';
 
 const env = loadEnv();
 const database = createDatabase(env.DATABASE_URL);
+const container = createContainer({
+  db: database.db,
+  auth: {
+    secret: env.BETTER_AUTH_SECRET,
+    baseURL: env.BETTER_AUTH_URL,
+    trustedOrigins: env.CORS_ORIGINS,
+  },
+});
 const app = createApp({
-  services: createContainer(database.db).services,
+  services: container.services,
+  auth: container.auth,
   corsOrigins: env.CORS_ORIGINS,
 });
 

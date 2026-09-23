@@ -7,9 +7,20 @@ import { createDatabase } from './shared/db/index.js';
 // Pool pg paresseux : aucune connexion n'est ouverte tant qu'aucune requête n'atteint la DB.
 // Ces tests ne couvrent que les chemins qui s'arrêtent avant la couche données.
 const database = createDatabase('postgres://unused:unused@127.0.0.1:1/unused');
+const container = createContainer({
+  db: database.db,
+  auth: {
+    secret: 'unit-tests-secret-0123456789abcdef0123',
+    baseURL: 'http://localhost:3000',
+    trustedOrigins: ['http://localhost:3000'],
+    rateLimit: false,
+  },
+});
 const app = createApp({
-  services: createContainer(database.db).services,
+  services: container.services,
+  auth: container.auth,
   corsOrigins: ['http://localhost:3000'],
+  logRequests: false,
 });
 
 afterAll(() => database.close());
@@ -62,11 +73,17 @@ describe('app (HTTP layer, no database)', () => {
     expect(body.error.code).toBe('BAD_REQUEST');
   });
 
-  it('reading routes require a user', async () => {
+  it('protected routes answer 401 without a session', async () => {
     const res = await app.request('/reading/progress');
 
     expect(res.status).toBe(401);
     const body = await readError(res);
     expect(body.error.code).toBe('UNAUTHORIZED');
+  });
+
+  it('ignores the legacy x-user-id header', async () => {
+    const res = await app.request('/reading/lists', { headers: { 'x-user-id': 'someone-else' } });
+
+    expect(res.status).toBe(401);
   });
 });
