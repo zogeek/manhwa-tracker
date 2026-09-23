@@ -16,6 +16,11 @@ import {
   check,
 } from 'drizzle-orm/pg-core';
 import { relations, sql } from 'drizzle-orm';
+import { user } from './auth-schema.js';
+
+// Tables Better Auth (user, session, account, verification) : générées par `pnpm auth:generate`,
+// ne jamais les modifier à la main.
+export * from './auth-schema.js';
 
 // ============================================================
 // COLUMN HELPERS
@@ -305,11 +310,12 @@ export const manhwaCovers = pgTable('manhwa_covers', {
 // READING PROGRESS — Vue macro du suivi de lecture
 // ============================================================
 // Le user_id fait référence à la table `user` gérée par Better Auth.
-// La FK sera ajoutée une fois Better Auth configuré.
 
 export const readingProgress = pgTable('reading_progress', {
   id: uuid('id').defaultRandom().primaryKey(),
-  userId: text('user_id').notNull(),
+  userId: text('user_id')
+    .notNull()
+    .references(() => user.id, { onDelete: 'cascade' }),
   manhwaId: uuid('manhwa_id')
     .notNull()
     .references(() => manhwas.id, { onDelete: 'cascade' }),
@@ -341,7 +347,9 @@ export const readingProgress = pgTable('reading_progress', {
 
 export const chapterReads = pgTable('chapter_reads', {
   id: uuid('id').defaultRandom().primaryKey(),
-  userId: text('user_id').notNull(),
+  userId: text('user_id')
+    .notNull()
+    .references(() => user.id, { onDelete: 'cascade' }),
   chapterId: uuid('chapter_id')
     .notNull()
     .references(() => chapters.id, { onDelete: 'cascade' }),
@@ -363,7 +371,9 @@ export const chapterReads = pgTable('chapter_reads', {
 
 export const readingLists = pgTable('reading_lists', {
   id: uuid('id').defaultRandom().primaryKey(),
-  userId: text('user_id').notNull(),
+  userId: text('user_id')
+    .notNull()
+    .references(() => user.id, { onDelete: 'cascade' }),
   name: text('name').notNull(),
   description: text('description'),
   color: text('color'),
@@ -528,6 +538,10 @@ export const manhwaCoversRelations = relations(manhwaCovers, ({ one }) => ({
 }));
 
 export const readingProgressRelations = relations(readingProgress, ({ one }) => ({
+  user: one(user, {
+    fields: [readingProgress.userId],
+    references: [user.id],
+  }),
   manhwa: one(manhwas, {
     fields: [readingProgress.manhwaId],
     references: [manhwas.id],
@@ -545,7 +559,11 @@ export const chapterReadsRelations = relations(chapterReads, ({ one }) => ({
   }),
 }));
 
-export const readingListsRelations = relations(readingLists, ({ many }) => ({
+export const readingListsRelations = relations(readingLists, ({ one, many }) => ({
+  user: one(user, {
+    fields: [readingLists.userId],
+    references: [user.id],
+  }),
   items: many(readingListItems),
 }));
 
