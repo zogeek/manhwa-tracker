@@ -3,7 +3,7 @@
 ## Démarrage
 
 ```sh
-cp .env.example .env.development   # puis ajuster DATABASE_URL
+cp .env.example .env.development   # puis ajuster DATABASE_URL et BETTER_AUTH_SECRET
 docker compose up -d               # depuis la racine du repo (Postgres sur :5431)
 pnpm db:migrate
 pnpm dev                           # http://localhost:3001
@@ -16,7 +16,10 @@ pnpm dev                           # http://localhost:3001
 | `dev` | Serveur en watch (`.env.development`) |
 | `build` / `start` | Compile dans `dist/` puis lance `dist/index.js` (`.env.production` si présent) |
 | `typecheck` | `tsc --noEmit` (src, specs et configs — vérifie aussi les assertions `expectTypeOf`) |
-| `test` / `test:watch` | Vitest (`src/**/*.spec.ts`) |
+| `test` / `test:watch` | Vitest : projets `unit` + `integration` |
+| `test:unit` | Specs sans DB (`*.spec.ts` hors `*.route.spec.ts`) |
+| `test:integration` | `*.route.spec.ts` sur un Postgres éphémère (Docker requis) ou `TEST_DATABASE_URL` |
+| `auth:generate` | Régénère `src/shared/db/auth-schema.ts` via le CLI Better Auth (ne jamais l'éditer à la main) |
 | `db:generate` | Génère une migration SQL dans `drizzle/` à partir de `src/shared/db/schema.ts` |
 | `db:migrate` / `db:migrate:prod` | Applique les migrations |
 | `db:push` | Synchronise le schéma sans migration — **dev uniquement** |
@@ -27,6 +30,12 @@ pnpm dev                           # http://localhost:3001
 - `src/container.ts` — composition root : instancie repositories Drizzle → services.
 - `src/app.ts` — `createApp({ services })` : middlewares, handler d'erreurs global, montage des routes. Exporte `AppType` (Hono RPC).
 - `src/modules/<module>/` — `schema`, `validator`, `repository` (interface + implémentation Drizzle), `service`, `route` (handlers inline chaînés, `createXRoutes(service)`).
+
+## Authentification
+
+- Better Auth est configuré dans `src/shared/auth/index.ts` et monté sur `/api/auth/*`.
+- `requireAuth` (`src/shared/middleware/auth.middleware.ts`) protège toutes les mutations et toutes les routes `/reading/*` ; l'identité vient exclusivement de la session.
+- Les listes de lecture vérifient la propriété : `403 FORBIDDEN` si la liste appartient à un autre utilisateur.
 
 ## Conventions HTTP
 
