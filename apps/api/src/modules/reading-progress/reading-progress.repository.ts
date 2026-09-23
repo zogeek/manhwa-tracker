@@ -1,7 +1,7 @@
-import { and, desc, eq, getTableColumns, sql } from 'drizzle-orm';
+import { and, desc, eq, getTableColumns, isNull, sql } from 'drizzle-orm';
 import type { PgUpdateSetSource } from 'drizzle-orm/pg-core';
 import type { DbClient } from '../../shared/db/index.js';
-import { chapters } from '../../shared/db/schema.js';
+import { chapters, manhwas } from '../../shared/db/schema.js';
 import { firstOrNull, firstOrThrow } from '../../shared/db/utils.js';
 import {
   chapterReads,
@@ -9,6 +9,7 @@ import {
   type ChapterRead,
   type NewChapterRead,
   type ReadingProgress,
+  type ReadingProgressWithManhwa,
 } from './reading-progress.schema.js';
 import type { UpdateProgressInput } from './reading-progress.validator.js';
 
@@ -21,7 +22,9 @@ export type ChapterReadApplication = {
 
 export interface ReadingProgressRepository {
   findByUserAndManhwa(userId: string, manhwaId: string): Promise<ReadingProgress | null>;
-  findAllByUser(userId: string): Promise<ReadingProgress[]>;
+  /** Bibliothèque de l'utilisateur, manhwas soft-deleted exclus. */
+  findAllByUser(userId: string): Promise<ReadingProgressWithManhwa[]>;
+  delete(userId: string, manhwaId: string): Promise<ReadingProgress | null>;
   /** Upsert atomique (un seul statement) : aucune fenêtre lecture → écriture. */
   upsert(userId: string, manhwaId: string, patch: UpdateProgressInput): Promise<ReadingProgress>;
   /** Répercute une lecture de chapitre sur la progression (upsert atomique). */
@@ -43,12 +46,22 @@ export class DrizzleReadingProgressRepository implements ReadingProgressReposito
     return firstOrNull(rows);
   }
 
-  async findAllByUser(userId: string): Promise<ReadingProgress[]> {
-    return this.db
-      .select()
+  async findAllByUser(userId: string): Promise<ReadingProgressWithManhwa[]> {
+    const rows = await this.db
+      .select({ progress: readingProgress, manhwa: manhwas })
       .from(readingProgress)
+      .innerJoin(manhwas, and(eq(readingProgress.manhwaId, manhwas.id), isNull(manhwas.deletedAt)))
       .where(eq(readingProgress.userId, userId))
       .orderBy(desc(readingProgress.updatedAt));
+    return rows.map(({ progress, manhwa }) => ({ ...progress, manhwa }));
+  }
+
+  async delete(userId: string, manhwaId: string): Promise<ReadingProgress | null> {
+    const rows = await this.db
+      .delete(readingProgress)
+      .where(and(eq(readingProgress.userId, userId), eq(readingProgress.manhwaId, manhwaId)))
+      .returning();
+    return firstOrNull(rows);
   }
 
   async upsert(userId: string, manhwaId: string, patch: UpdateProgressInput): Promise<ReadingProgress> {

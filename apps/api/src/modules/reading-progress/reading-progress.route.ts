@@ -36,6 +36,11 @@ export const createReadingProgressRoutes = (
         return c.json({ data: progress }, 200);
       },
     )
+    .delete('/progress/:manhwaId', requireAuth, validate('param', manhwaIdParamSchema), async (c) => {
+      const { manhwaId } = c.req.valid('param');
+      await service.removeProgress(c.get('user').id, manhwaId);
+      return c.body(null, 204);
+    })
     // Chapter reads
     .post('/reads', requireAuth, validate('json', logChapterReadSchema), async (c) => {
       const logged = await service.logRead(c.get('user').id, c.req.valid('json'));

@@ -22,6 +22,9 @@ describe('AppType (Hono RPC contract)', () => {
     type Sources = InferResponseType<typeof client.sources.$get, 200>;
     expectTypeOf<Sources['data'][number]['baseUrl']>().toEqualTypeOf<string>();
 
+    type Library = InferResponseType<typeof client.reading.progress.$get, 200>;
+    expectTypeOf<Library['data'][number]['manhwa']['title']>().toEqualTypeOf<string>();
+
     type Progress = InferResponseType<(typeof client.reading.progress)[':manhwaId']['$get'], 200>;
     expectTypeOf<NonNullable<Progress['data']>['furthestChapter']>().toEqualTypeOf<number>();
   });
