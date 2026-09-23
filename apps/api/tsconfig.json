@@ -23,5 +23,5 @@
 
     "noEmit": true
   },
-  "include": ["src", "drizzle.config.ts", "vitest.config.ts"]
+  "include": ["src", "drizzle.config.ts", "vitest.config.ts", "better-auth.config.ts"]
 }

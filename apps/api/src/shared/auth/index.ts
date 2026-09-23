@@ -1,0 +1,54 @@
+import { betterAuth } from 'better-auth';
+import { drizzleAdapter } from 'better-auth/adapters/drizzle';
+import type { Database } from '../db/index.js';
+import * as schema from '../db/schema.js';
+
+export type AuthOptions = {
+  db: Database;
+  secret: string;
+  baseURL: string;
+  trustedOrigins: string[];
+  /** Désactivable uniquement pour les tests d'intégration (inscriptions en rafale). */
+  rateLimit?: boolean;
+};
+
+/**
+ * Source de vérité unique de la configuration Better Auth (cf. CLAUDE.md).
+ * Instanciée une seule fois, par la composition root (`container.ts`).
+ */
+export function createAuth({ db, secret, baseURL, trustedOrigins, rateLimit = true }: AuthOptions) {
+  return betterAuth({
+    appName: 'Manhwa Tracker',
+    secret,
+    baseURL,
+    basePath: '/api/auth',
+    trustedOrigins,
+    database: drizzleAdapter(db, {
+      provider: 'pg',
+      schema: {
+        user: schema.user,
+        session: schema.session,
+        account: schema.account,
+        verification: schema.verification,
+      },
+    }),
+    emailAndPassword: {
+      enabled: true,
+      minPasswordLength: 10,
+    },
+    // Protection brute-force sur /api/auth/* (stockage mémoire : suffisant pour une instance unique).
+    rateLimit: {
+      enabled: rateLimit,
+      window: 60,
+      max: 100,
+      customRules: {
+        '/sign-in/email': { window: 60, max: 5 },
+        '/sign-up/email': { window: 60, max: 3 },
+      },
+    },
+  });
+}
+
+export type Auth = ReturnType<typeof createAuth>;
+export type AuthSession = Auth['$Infer']['Session'];
+export type AuthUser = AuthSession['user'];
