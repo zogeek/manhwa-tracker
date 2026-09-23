@@ -15,11 +15,18 @@ pnpm dev                           # http://localhost:3001
 |---|---|
 | `dev` | Serveur en watch (`.env.development`) |
 | `build` / `start` | Compile dans `dist/` puis lance `dist/index.js` (`.env.production` si présent) |
-| `typecheck` | `tsc --noEmit` (src + drizzle.config.ts) |
+| `typecheck` | `tsc --noEmit` (src, specs et configs — vérifie aussi les assertions `expectTypeOf`) |
+| `test` / `test:watch` | Vitest (`src/**/*.spec.ts`) |
 | `db:generate` | Génère une migration SQL dans `drizzle/` à partir de `src/shared/db/schema.ts` |
 | `db:migrate` / `db:migrate:prod` | Applique les migrations |
 | `db:push` | Synchronise le schéma sans migration — **dev uniquement** |
 | `db:studio` | Drizzle Studio |
+
+## Architecture
+
+- `src/container.ts` — composition root : instancie repositories Drizzle → services.
+- `src/app.ts` — `createApp({ services })` : middlewares, handler d'erreurs global, montage des routes. Exporte `AppType` (Hono RPC).
+- `src/modules/<module>/` — `schema`, `validator`, `repository` (interface + implémentation Drizzle), `service`, `route` (handlers inline chaînés, `createXRoutes(service)`).
 
 ## Conventions HTTP
 
