@@ -1,6 +1,6 @@
 import { createMiddleware } from 'hono/factory';
-import type { Auth, AuthSession, AuthUser } from '../auth/index.js';
-import { UnauthorizedError } from '../lib/errors.js';
+import { ADMIN_ROLE, hasRole, type Auth, type AuthSession, type AuthUser } from '../auth/index.js';
+import { ForbiddenError, UnauthorizedError } from '../lib/errors.js';
 
 /** Variables garanties dans les handlers placés derrière `requireAuth`. */
 export type AuthenticatedEnv = {
@@ -32,6 +32,17 @@ export function createAuthMiddleware(auth: Auth) {
     await next();
   });
 
+  /** Session obligatoire (401) ET rôle admin (403). Réservé aux mutations du catalogue. */
+  const requireAdmin = createMiddleware<AuthenticatedEnv>(async (c, next) => {
+    const result = await auth.api.getSession({ headers: c.req.raw.headers });
+    if (!result) throw new UnauthorizedError();
+    if (!hasRole(result.user, ADMIN_ROLE)) throw new ForbiddenError('Admin role required');
+
+    c.set('user', result.user);
+    c.set('session', result.session);
+    await next();
+  });
+
   const optionalAuth = createMiddleware<OptionalAuthEnv>(async (c, next) => {
     const result = await auth.api.getSession({ headers: c.req.raw.headers });
 
@@ -40,7 +51,7 @@ export function createAuthMiddleware(auth: Auth) {
     await next();
   });
 
-  return { requireAuth, optionalAuth };
+  return { requireAuth, requireAdmin, optionalAuth };
 }
 
 export type AuthMiddleware = ReturnType<typeof createAuthMiddleware>;

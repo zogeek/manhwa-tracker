@@ -1,5 +1,6 @@
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
+import { admin } from 'better-auth/plugins';
 import type { Database } from '../db/index.js';
 import * as schema from '../db/schema.js';
 
@@ -36,6 +37,8 @@ export function createAuth({ db, secret, baseURL, trustedOrigins, rateLimit = tr
       enabled: true,
       minPasswordLength: 10,
     },
+    // Rôles (`user` par défaut, `admin`) + endpoints d'administration /api/auth/admin/* réservés aux admins.
+    plugins: [admin({ defaultRole: 'user', adminRoles: ['admin'] })],
     // Protection brute-force sur /api/auth/* (stockage mémoire : suffisant pour une instance unique).
     rateLimit: {
       enabled: rateLimit,
@@ -52,3 +55,10 @@ export function createAuth({ db, secret, baseURL, trustedOrigins, rateLimit = tr
 export type Auth = ReturnType<typeof createAuth>;
 export type AuthSession = Auth['$Infer']['Session'];
 export type AuthUser = AuthSession['user'];
+
+export const ADMIN_ROLE = 'admin';
+
+/** Le plugin admin stocke les rôles en liste séparée par des virgules (ex. "user,admin"). */
+export function hasRole(user: Pick<AuthUser, 'role'>, role: string): boolean {
+  return (user.role ?? '').split(',').some((value) => value.trim() === role);
+}
