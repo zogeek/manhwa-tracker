@@ -1,7 +1,7 @@
 name: ERD Build
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "master" ]
 
 jobs:
   build-erd:
@@ -10,6 +10,6 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Generate ER Diagrams
-        run: npx @liam-hq/cli erd build --input apps/api/src/db/schema.ts --format drizzle
+        run: npx @liam-hq/cli erd build --input apps/api/src/shared/db/schema.ts --format drizzle
 
     # - Next step: Deploy ERD `./dist` to your preferred hosting service for easy sharing and access.
