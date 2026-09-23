@@ -20,18 +20,18 @@ export class ChapterService {
     return chapter;
   }
 
-  async create(data: CreateChapterInput, userId?: string): Promise<Chapter> {
-    return this.repo.insert({ ...data, createdBy: userId ?? null });
+  async create(data: CreateChapterInput, userId: string): Promise<Chapter> {
+    return this.repo.insert({ ...data, createdBy: userId });
   }
 
-  async update(id: Chapter['id'], data: UpdateChapterInput, userId?: string): Promise<Chapter> {
-    const updated = await this.repo.update(id, { ...data, updatedBy: userId ?? null });
+  async update(id: Chapter['id'], data: UpdateChapterInput, userId: string): Promise<Chapter> {
+    const updated = await this.repo.update(id, { ...data, updatedBy: userId });
     if (!updated) throw new NotFoundError('Chapter', id);
     return updated;
   }
 
-  async delete(id: Chapter['id'], userId?: string): Promise<void> {
-    const deleted = await this.repo.softDelete(id, userId ?? null);
+  async delete(id: Chapter['id'], userId: string): Promise<void> {
+    const deleted = await this.repo.softDelete(id, userId);
     if (!deleted) throw new NotFoundError('Chapter', id);
   }
 }

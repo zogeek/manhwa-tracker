@@ -16,18 +16,18 @@ export class SourceService {
     return source;
   }
 
-  async create(data: CreateSourceInput, userId?: string): Promise<Source> {
-    return this.repo.insert({ ...data, createdBy: userId ?? null });
+  async create(data: CreateSourceInput, userId: string): Promise<Source> {
+    return this.repo.insert({ ...data, createdBy: userId });
   }
 
-  async update(id: Source['id'], data: UpdateSourceInput, userId?: string): Promise<Source> {
-    const updated = await this.repo.update(id, { ...data, updatedBy: userId ?? null });
+  async update(id: Source['id'], data: UpdateSourceInput, userId: string): Promise<Source> {
+    const updated = await this.repo.update(id, { ...data, updatedBy: userId });
     if (!updated) throw new NotFoundError('Source', id);
     return updated;
   }
 
-  async delete(id: Source['id'], userId?: string): Promise<void> {
-    const deleted = await this.repo.softDelete(id, userId ?? null);
+  async delete(id: Source['id'], userId: string): Promise<void> {
+    const deleted = await this.repo.softDelete(id, userId);
     if (!deleted) throw new NotFoundError('Source', id);
   }
 }

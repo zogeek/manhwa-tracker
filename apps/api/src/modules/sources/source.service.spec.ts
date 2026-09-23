@@ -71,17 +71,17 @@ describe('SourceService', () => {
   });
 
   it('soft deletes: the source disappears from reads and cannot be deleted twice', async () => {
-    const source = await service.create({ name: 'Asura', baseUrl: 'https://asura.example' });
+    const source = await service.create({ name: 'Asura', baseUrl: 'https://asura.example' }, 'user-1');
 
     await service.delete(source.id, 'user-2');
 
     expect(repo.rows.get(source.id)?.updatedBy).toBe('user-2');
     expect(await service.getAll()).toEqual([]);
     await expect(service.getById(source.id)).rejects.toBeInstanceOf(NotFoundError);
-    await expect(service.delete(source.id)).rejects.toBeInstanceOf(NotFoundError);
+    await expect(service.delete(source.id, 'user-2')).rejects.toBeInstanceOf(NotFoundError);
   });
 
   it('throws NotFoundError when updating a missing source', async () => {
-    await expect(service.update(randomUUID(), { name: 'x' })).rejects.toBeInstanceOf(NotFoundError);
+    await expect(service.update(randomUUID(), { name: 'x' }, 'user-1')).rejects.toBeInstanceOf(NotFoundError);
   });
 });

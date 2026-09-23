@@ -40,10 +40,10 @@ export function createApp({ services, auth, corsOrigins, logRequests = true }: A
 
   return app
     .get('/health', (c) => c.json({ status: 'ok' }))
-    .route('/sources', createSourceRoutes(services.sources))
-    .route('/manhwas', createManhwaRoutes(services.manhwas))
-    .route('/chapters', createChapterRoutes(services.chapters))
-    .route('/genres', createGenreRoutes(services.genres))
+    .route('/sources', createSourceRoutes(services.sources, authMiddleware))
+    .route('/manhwas', createManhwaRoutes(services.manhwas, authMiddleware))
+    .route('/chapters', createChapterRoutes(services.chapters, authMiddleware))
+    .route('/genres', createGenreRoutes(services.genres, authMiddleware))
     .route('/reading', createReadingProgressRoutes(services.readingProgress, authMiddleware))
     .route('/reading/lists', createReadingListRoutes(services.readingLists, authMiddleware));
 }

@@ -61,16 +61,14 @@ describe('app (HTTP layer, no database)', () => {
     expect(body.error.details).toEqual([expect.objectContaining({ path: 'id' })]);
   });
 
-  it('malformed JSON bodies are rejected with BAD_REQUEST', async () => {
+  it('checks authentication before parsing the body', async () => {
     const res = await app.request('/manhwas', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: '{not json',
     });
 
-    expect(res.status).toBe(400);
-    const body = await readError(res);
-    expect(body.error.code).toBe('BAD_REQUEST');
+    expect(res.status).toBe(401);
   });
 
   it('protected routes answer 401 without a session', async () => {

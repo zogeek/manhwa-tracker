@@ -16,18 +16,18 @@ export class ManhwaService {
     return manhwa;
   }
 
-  async create(data: CreateManhwaInput, userId?: string): Promise<Manhwa> {
-    return this.repo.insert({ ...data, createdBy: userId ?? null });
+  async create(data: CreateManhwaInput, userId: string): Promise<Manhwa> {
+    return this.repo.insert({ ...data, createdBy: userId });
   }
 
-  async update(id: Manhwa['id'], data: UpdateManhwaInput, userId?: string): Promise<Manhwa> {
-    const updated = await this.repo.update(id, { ...data, updatedBy: userId ?? null });
+  async update(id: Manhwa['id'], data: UpdateManhwaInput, userId: string): Promise<Manhwa> {
+    const updated = await this.repo.update(id, { ...data, updatedBy: userId });
     if (!updated) throw new NotFoundError('Manhwa', id);
     return updated;
   }
 
-  async delete(id: Manhwa['id'], userId?: string): Promise<void> {
-    const deleted = await this.repo.softDelete(id, userId ?? null);
+  async delete(id: Manhwa['id'], userId: string): Promise<void> {
+    const deleted = await this.repo.softDelete(id, userId);
     if (!deleted) throw new NotFoundError('Manhwa', id);
   }
 }
