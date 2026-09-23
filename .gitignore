@@ -19,7 +19,7 @@ db-data
 .env.test.local
 .env.production
 .env.production.local
-.env*.localform
+.env*.local
 
 
 
