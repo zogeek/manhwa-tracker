@@ -4,8 +4,8 @@ Ton objectif est de maintenir un code de qualité "Enterprise-Grade", robuste, s
 
 # 🏗️ ARCHITECTURE & RÈGLES DE CODE (Backend Hono)
 1. **Typage Absolu :** Interdiction stricte d'utiliser `any` ou les type casts (`as never`, `as string`). L'inférence Hono RPC et Zod doit fonctionner nativement de bout en bout.
-2. **Injection de Dépendances (IoC) :** Les dépendances (DB, Repositories, Services) doivent TOUJOURS être passées par le constructeur. Jamais d'instanciation (`new X()`) à l'intérieur d'une classe métier. Les `*.route.ts` servent de Composition Root.
-3. **Gestion des Erreurs :** Ne jamais utiliser de `try/catch` dans les controllers. Laisse remonter les erreurs de domaine (`AppError`, `NotFoundError`) pour qu'elles soient interceptées par le ErrorHandler centralisé de l'API.
+2. **Injection de Dépendances (IoC) :** Les dépendances (DB, Repositories, Services) doivent TOUJOURS être passées par le constructeur. Jamais d'instanciation (`new X()`) à l'intérieur d'une classe métier. La **Composition Root** est `apps/api/src/container.ts` : c'est le seul fichier qui instancie les implémentations concrètes (repositories Drizzle → services). L'app est assemblée par la factory `createApp()` (`src/app.ts`), qui reçoit les services en paramètre ; les `*.route.ts` sont eux aussi des factories (`createXRoutes(service)`) et n'instancient jamais rien.
+3. **Gestion des Erreurs :** Ne jamais utiliser de `try/catch` dans les handlers de route. Laisse remonter les erreurs de domaine (`AppError`, `NotFoundError`) pour qu'elles soient interceptées par le ErrorHandler centralisé de l'API.
 4. **Sécurité (Zero Trust) :** Ne fais jamais confiance aux inputs clients ou aux headers non signés (ex: `x-user-id`). Toute route protégée doit vérifier l'autorisation via le middleware d'authentification officiel de l'app.
 5. **Base de données (Drizzle) :** Les dates doivent être en `timestamptz`. Les nombres décimaux en `numeric`. Toujours utiliser des index uniques partiels pour gérer le soft delete proprement.
 
@@ -30,9 +30,20 @@ Tu es 100% autonome sur la gestion du versioning. À la fin de chaque tâche fon
 4. Les tables `user`, `session`, `account`, `verification` sont générées par le CLI Better Auth — ne jamais les modifier à la main dans `schema.ts`, toujours régénérer.
 5. Toute nouvelle route protégée doit avoir un test d'intégration qui vérifie le 401 sans session ET le 403 si l'user n'est pas propriétaire de la ressource (ex: modifier la reading_list d'un autre user).
 
-# 🧪 TESTS (Vitest) — Règle Absolue
+# 🧪 TESTS — Règle Absolue
+
+## Matrice de tests du monorepo
+| Workspace | Unitaires / composants | Intégration / E2E | Commande |
+|---|---|---|---|
+| **API** (`apps/api`, Hono/TS) | `vitest` — services avec repositories fakes/mockés (aucune DB) | `vitest` — routes via `app.request()` sur un Postgres de test dédié | `pnpm --filter api test` |
+| **Web** (`apps/web`, Next.js) | `vitest` — composants (Testing Library) | `Playwright` — parcours E2E globaux (front + API) | `pnpm --filter web test` / `pnpm --filter web test:e2e` |
+| **Scraper** (`apps/scraper`, Python) | `pytest` | `pytest` — contrat HTTP vers l'API Hono (API mockée) | `pytest` dans `apps/scraper` |
+
+Les fichiers de test vivent à côté du code (`*.spec.ts`) et sont exclus du build de production.
+
+## Règles
 1. **Avant tout commit**, en plus de `pnpm --filter api typecheck`, lancer `pnpm --filter api test`. Un test rouge bloque le commit, sans exception.
-2. **Pyramide de tests par module (pattern 6 fichiers) :**
+2. **Pyramide de tests par module (pattern 5 fichiers : schema, validator, repository, service, route) :**
    - `*.service.spec.ts` → tests unitaires, repository mocké/injecté en fake, couvre la logique métier et les `NotFoundError`/`ConflictError`.
    - `*.route.spec.ts` → tests d'intégration sur une DB de test (conteneur Postgres dédié, jamais la DB de dev), via `app.request()` de Hono.
 3. Tout nouveau module (ex: `manhwa_titles`, `manhwa_authors`, `external_links`...) livré sans tests n'est PAS considéré comme terminé, même si `typecheck` passe.
