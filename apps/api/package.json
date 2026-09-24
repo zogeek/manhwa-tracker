@@ -2,6 +2,11 @@
   "name": "api",
   "private": true,
   "type": "module",
+  "exports": {
+    "./app": {
+      "types": "./src/app.ts"
+    }
+  },
   "scripts": {
     "dev": "node --env-file-if-exists=.env.development --import tsx --watch src/index.ts",
     "build": "tsc -p tsconfig.build.json",
@@ -16,7 +21,8 @@
     "db:migrate:prod": "NODE_ENV=production drizzle-kit migrate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
-    "auth:generate": "auth generate --config better-auth.config.ts --output src/shared/db/auth-schema.ts --yes"
+    "auth:generate": "auth generate --config better-auth.config.ts --output src/shared/db/auth-schema.ts --yes",
+    "admin:promote": "node --env-file-if-exists=.env.development --import tsx src/scripts/promote-admin.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.19.17",

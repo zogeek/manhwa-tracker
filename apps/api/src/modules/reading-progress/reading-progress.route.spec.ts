@@ -79,6 +79,29 @@ describe('POST /reading/reads — atomic read + progress', () => {
   });
 });
 
+describe('library (GET / DELETE /reading/progress)', () => {
+  it('embeds the tracked manhwa in each entry', async () => {
+    await logRead(catalog.chapterByNumber(1).id, reader);
+
+    const res = await reading.progress.$get({}, { headers: reader.headers });
+    const body = await res.json();
+
+    expect(body.data).toHaveLength(1);
+    expect(body.data[0]?.manhwa).toMatchObject({ id: catalog.manhwa.id, title: 'Solo Leveling' });
+  });
+
+  it('removes a series from the library but keeps the read history', async () => {
+    await logRead(catalog.chapterByNumber(1).id, reader);
+    const remove = () =>
+      reading.progress[':manhwaId'].$delete({ param: { manhwaId: catalog.manhwa.id } }, { headers: reader.headers });
+
+    expect((await remove()).status).toBe(204);
+    expect((await remove()).status).toBe(404);
+    const history = await reading.reads.$get({}, { headers: reader.headers });
+    expect((await history.json()).data).toHaveLength(1);
+  });
+});
+
 describe('PUT /reading/progress/:manhwaId — partial atomic upsert', () => {
   it('only updates provided fields and keeps furthestChapter monotonic', async () => {
     const put = (json: { currentChapter?: number; rating?: number; status?: 'completed' }) =>

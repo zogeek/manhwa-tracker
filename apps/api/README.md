@@ -19,6 +19,7 @@ pnpm dev                           # http://localhost:3001
 | `test` / `test:watch` | Vitest : projets `unit` + `integration` |
 | `test:unit` | Specs sans DB (`*.spec.ts` hors `*.route.spec.ts`) |
 | `test:integration` | `*.route.spec.ts` sur un Postgres éphémère (Docker requis) ou `TEST_DATABASE_URL` |
+| `admin:promote <email>` | Donne le rôle `admin` à un utilisateur existant (bootstrap du premier admin) |
 | `auth:generate` | Régénère `src/shared/db/auth-schema.ts` via le CLI Better Auth (ne jamais l'éditer à la main) |
 | `db:generate` | Génère une migration SQL dans `drizzle/` à partir de `src/shared/db/schema.ts` |
 | `db:migrate` / `db:migrate:prod` | Applique les migrations |
@@ -34,7 +35,9 @@ pnpm dev                           # http://localhost:3001
 ## Authentification
 
 - Better Auth est configuré dans `src/shared/auth/index.ts` et monté sur `/api/auth/*`.
-- `requireAuth` (`src/shared/middleware/auth.middleware.ts`) protège toutes les mutations et toutes les routes `/reading/*` ; l'identité vient exclusivement de la session.
+- `requireAuth` (`src/shared/middleware/auth.middleware.ts`) protège toutes les routes `/reading/*` ; l'identité vient exclusivement de la session.
+- `requireAdmin` (session + rôle `admin`, plugin admin de Better Auth) protège toutes les mutations du catalogue (sources, manhwas, chapters, genres) : `401` sans session, `403` sans le rôle.
+- Premier admin : s'inscrire, puis `pnpm --filter api admin:promote <email>`. Les admins gèrent ensuite les rôles via `/api/auth/admin/*`.
 - Les listes de lecture vérifient la propriété : `403 FORBIDDEN` si la liste appartient à un autre utilisateur.
 
 ## Conventions HTTP

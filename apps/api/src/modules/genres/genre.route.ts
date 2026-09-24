@@ -5,7 +5,8 @@ import type { AuthMiddleware } from '../../shared/middleware/auth.middleware.js'
 import type { GenreService } from './genre.service.js';
 import { createGenreSchema, updateGenreSchema, genreIdParamSchema } from './genre.validator.js';
 
-export const createGenreRoutes = (service: GenreService, { requireAuth }: AuthMiddleware) =>
+/** Catalogue : lecture publique, mutations réservées au rôle admin. */
+export const createGenreRoutes = (service: GenreService, { requireAdmin }: AuthMiddleware) =>
   new Hono<AppEnv>()
     .get('/', async (c) => {
       const genres = await service.getAll();
@@ -16,13 +17,13 @@ export const createGenreRoutes = (service: GenreService, { requireAuth }: AuthMi
       const genre = await service.getById(id);
       return c.json({ data: genre }, 200);
     })
-    .post('/', requireAuth, validate('json', createGenreSchema), async (c) => {
+    .post('/', requireAdmin, validate('json', createGenreSchema), async (c) => {
       const genre = await service.create(c.req.valid('json'));
       return c.json({ data: genre }, 201);
     })
     .patch(
       '/:id',
-      requireAuth,
+      requireAdmin,
       validate('param', genreIdParamSchema),
       validate('json', updateGenreSchema),
       async (c) => {
@@ -31,7 +32,7 @@ export const createGenreRoutes = (service: GenreService, { requireAuth }: AuthMi
         return c.json({ data: genre }, 200);
       },
     )
-    .delete('/:id', requireAuth, validate('param', genreIdParamSchema), async (c) => {
+    .delete('/:id', requireAdmin, validate('param', genreIdParamSchema), async (c) => {
       const { id } = c.req.valid('param');
       await service.delete(id);
       return c.body(null, 204);
