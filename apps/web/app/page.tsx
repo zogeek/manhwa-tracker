@@ -11,8 +11,6 @@ import {
   Shield, 
   ChevronDown, 
   Layers, 
-  Clock, 
-  BookOpenCheck, 
   Lock, 
   Bell, 
   Zap, 
@@ -64,25 +62,22 @@ function ScrollReveal({
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    // Nœud capturé au montage : `ref.current` peut avoir changé au moment du cleanup.
+    const node = ref.current;
+    if (!node) return;
+
     const observer = new IntersectionObserver(
       ([entry]) => {
-        if (entry.isIntersecting) {
+        if (entry?.isIntersecting) {
           setIsIntersecting(true);
-          observer.unobserve(entry.target);
+          observer.disconnect();
         }
       },
       { threshold: 0.05 }
     );
+    observer.observe(node);
 
-    if (ref.current) {
-      observer.observe(ref.current);
-    }
-
-    return () => {
-      if (ref.current) {
-        observer.unobserve(ref.current);
-      }
-    };
+    return () => observer.disconnect();
   }, []);
 
   const getTransform = () => {
@@ -113,43 +108,32 @@ function ScrollReveal({
 
 // --- AnimatedCounter Helper Component ---
 function AnimatedCounter({ value, className }: { value: string; className?: string }) {
-  const [displayValue, setDisplayValue] = useState("0");
-  const [mounted, setMounted] = useState(false);
+  // Rendu serveur et premier rendu client : la valeur finale (pas de mismatch d'hydratation).
+  const [displayValue, setDisplayValue] = useState(value);
 
   useEffect(() => {
-    setMounted(true);
-
     const numericPart = parseInt(value.replace(/[^0-9]/g, ""), 10);
+    if (isNaN(numericPart)) return;
+
     const suffix = value.replace(/[0-9]/g, "");
-
-    if (isNaN(numericPart)) {
-      setDisplayValue(value);
-      return;
-    }
-
-    let start = 0;
     const duration = 1500;
     const startTime = performance.now();
+    let frame = 0;
 
+    // Les mises à jour d'état ont lieu dans les callbacks d'animation, jamais pendant l'effet.
     const animate = (currentTime: number) => {
-      const elapsedTime = currentTime - startTime;
-      const progress = Math.min(elapsedTime / duration, 1);
+      const progress = Math.min((currentTime - startTime) / duration, 1);
       const easeProgress = progress * (2 - progress); // Ease Out
-      const currentCount = Math.floor(easeProgress * numericPart);
-
-      setDisplayValue(`${currentCount}${suffix}`);
+      setDisplayValue(`${Math.floor(easeProgress * numericPart)}${suffix}`);
 
       if (progress < 1) {
-        requestAnimationFrame(animate);
+        frame = requestAnimationFrame(animate);
       }
     };
 
-    requestAnimationFrame(animate);
+    frame = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(frame);
   }, [value]);
-
-  if (!mounted) {
-    return <span className={className}>{value}</span>;
-  }
 
   return <span className={className}>{displayValue}</span>;
 }
@@ -286,7 +270,7 @@ export default function Home() {
 
         <ScrollReveal delay={200}>
           <p className="text-zinc-400 text-base md:text-xl max-w-2xl mb-12 leading-relaxed">
-            Gardez un oeil sur votre historique de lecture de Manhwas. Notre scraper s'occupe de surveiller la sortie des scans pour mettre à jour votre tableau de bord en temps réel.
+            Gardez un oeil sur votre historique de lecture de Manhwas. Notre scraper s’occupe de surveiller la sortie des scans pour mettre à jour votre tableau de bord en temps réel.
           </p>
         </ScrollReveal>
 
@@ -425,7 +409,7 @@ export default function Home() {
                 Comment ça marche ?
               </Badge>
               <h2 className="text-3xl font-black tracking-tight text-white md:text-5xl">
-                Le cycle de vie d'une{" "}
+                Le cycle de vie d’une{" "}
                 <span className="bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent">
                   mise à jour de scan
                 </span>
@@ -553,7 +537,7 @@ export default function Home() {
                 </span>
               </h2>
               <p className="mx-auto mt-4 max-w-lg text-sm text-zinc-400 leading-relaxed">
-                ManhwaTracker est conçu pour s'adapter à vos besoins de déploiement, que vous souhaitiez une solution clé en main ou un contrôle total en local.
+                ManhwaTracker est conçu pour s’adapter à vos besoins de déploiement, que vous souhaitiez une solution clé en main ou un contrôle total en local.
               </p>
             </div>
           </ScrollReveal>
@@ -573,7 +557,7 @@ export default function Home() {
                   </CardHeader>
                   <CardContent className="px-6 pt-4">
                     <p className="text-zinc-400 text-xs md:text-sm leading-relaxed mb-4">
-                      Idéal pour recycler un vieil ordinateur portable ou un serveur à la maison. Déployez l'entièreté des microservices via notre configuration Docker et accédez-y de l'extérieur en toute sécurité via Tailscale.
+                      Idéal pour recycler un vieil ordinateur portable ou un serveur à la maison. Déployez l’entièreté des microservices via notre configuration Docker et accédez-y de l’extérieur en toute sécurité via Tailscale.
                     </p>
                     <Separator className="my-4 bg-zinc-800/80" />
                     <ul className="space-y-2.5 text-xs text-zinc-450">
@@ -614,7 +598,7 @@ export default function Home() {
                   </CardHeader>
                   <CardContent className="px-6 pt-4">
                     <p className="text-zinc-400 text-xs md:text-sm leading-relaxed mb-4">
-                      Pas envie de gérer des conteneurs Docker ou un serveur chez vous ? Accédez à notre instance hébergée sur le cloud, prête à l'emploi. Le scraping automatique est mutualisé pour préserver les ressources.
+                      Pas envie de gérer des conteneurs Docker ou un serveur chez vous ? Accédez à notre instance hébergée sur le cloud, prête à l’emploi. Le scraping automatique est mutualisé pour préserver les ressources.
                     </p>
                     <Separator className="my-4 bg-zinc-800/80" />
                     <ul className="space-y-2.5 text-xs text-zinc-450">
@@ -656,7 +640,7 @@ export default function Home() {
               ?
             </h2>
             <p className="mx-auto mt-5 max-w-md text-sm md:text-base text-zinc-400 leading-relaxed">
-              Créez votre liste de suivi en quelques secondes, importez vos séries préférées et laissez notre scraper s'occuper du reste.
+              Créez votre liste de suivi en quelques secondes, importez vos séries préférées et laissez notre scraper s’occuper du reste.
             </p>
 
             <div className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
@@ -702,7 +686,7 @@ export default function Home() {
           {/* Socials & Credits */}
           <div className="flex items-center gap-4 text-zinc-650 text-xs">
             <p className="flex items-center gap-1">
-              Fait avec <Heart size={10} className="text-red-500/60" /> par l'équipe
+              Fait avec <Heart size={10} className="text-red-500/60" /> par l’équipe
             </p>
             <a href="#" className="hover:text-zinc-400 transition-colors" aria-label="GitHub">
               <GithubIcon width={15} height={15} />
