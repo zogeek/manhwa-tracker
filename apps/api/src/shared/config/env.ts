@@ -8,6 +8,8 @@ const envSchema = z.object({
   BETTER_AUTH_SECRET: z.string().min(32, 'BETTER_AUTH_SECRET must be at least 32 characters'),
   /** URL publique par laquelle le navigateur atteint l'API (via le proxy Next.js en dev/prod). */
   BETTER_AUTH_URL: z.url(),
+  /** Clé d'API du worker de scraping (header `x-api-key`) : `openssl rand -hex 32`. */
+  SCRAPER_API_KEY: z.string().min(32, 'SCRAPER_API_KEY must be at least 32 characters'),
   CORS_ORIGINS: z
     .string()
     .default('http://localhost:3000')
