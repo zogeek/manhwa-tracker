@@ -2,6 +2,7 @@
 node_modules/
 .pnpm-store/
 .turbo/
+.idea/
 
 # Builds des applications
 .next/
@@ -13,10 +14,14 @@ db-data
 # Fichiers d'environnement
 .env
 .env.local
+.env.development
 .env.development.local
 .env.test.local
+.env.production
 .env.production.local
 .env*.local
+
+
 
 # Divers
 .DS_Store

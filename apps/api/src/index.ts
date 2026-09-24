@@ -1,34 +1,43 @@
-import { serve } from '@hono/node-server'
-import { Hono } from 'hono'
-import { cors } from 'hono/cors'
-import { db } from './db/index.ts'
-import { manhwas } from './db/schema.ts'
+import { serve } from '@hono/node-server';
+import { createApp } from './app.js';
+import { createContainer } from './container.js';
+import { loadEnv } from './shared/config/env.js';
+import { createDatabase } from './shared/db/index.js';
 
+export type { AppType } from './app.js';
 
-const app = new Hono()
+const env = loadEnv();
+const database = createDatabase(env.DATABASE_URL);
+const container = createContainer({
+  db: database.db,
+  auth: {
+    secret: env.BETTER_AUTH_SECRET,
+    baseURL: env.BETTER_AUTH_URL,
+    trustedOrigins: env.CORS_ORIGINS,
+  },
+});
+const app = createApp({
+  services: container.services,
+  auth: container.auth,
+  corsOrigins: env.CORS_ORIGINS,
+});
 
-app.use('*', cors({
-  origin: 'http://localhost:3000',
-  credentials: true,
-}))
+const server = serve({ fetch: app.fetch, port: env.PORT }, (info) => {
+  console.log(`API listening on http://localhost:${info.port} (${env.NODE_ENV})`);
+});
 
-app.get('/', (c) => {
-  return c.text('Hello Hono!')
-})
+function shutdown(signal: NodeJS.Signals): void {
+  console.log(`${signal} received, shutting down…`);
+  server.close(() => {
+    database
+      .close()
+      .then(() => process.exit(0))
+      .catch((error: unknown) => {
+        console.error('Failed to close the database pool', error);
+        process.exit(1);
+      });
+  });
+}
 
-app.get('/health', (c) => {
-  return c.json({ status: 'OK' })
-})
-
-app.get('/manhwa', async (c) => {
-  
-  const manhwaList = await db.select().from(manhwas);
-  return c.json(manhwaList);
-})
-
-serve({
-  fetch: app.fetch,
-  port: 3001
-}, (info) => {
-  console.log(`Server is running on http://localhost:${info.port}`)
-})
+process.once('SIGINT', shutdown);
+process.once('SIGTERM', shutdown);
