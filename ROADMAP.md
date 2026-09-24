@@ -144,16 +144,17 @@ Les tables personnelles (`reading_progress`, `chapter_reads`, `reading_lists`) o
 
 ---
 
-## 4. Frontend (`apps/web/`) — ✅ Branché sur l'API
+## 4. Frontend (`apps/web/`) — 🧹 Table rase de l'UI (infrastructure conservée)
 
 | Élément | État |
 |---|---|
 | Proxy same-origin (`next.config.ts`) | ✅ `/api/auth/*` → Hono `/api/auth/*`, `/api/*` → Hono `/*` (`API_INTERNAL_URL`, figé au build) |
 | Client RPC (`app/lib/api.ts`) | ✅ `hc<AppType>` — `AppType` importé du paquet workspace `api` |
 | Auth (`app/lib/auth-client.ts`, `/login`) | ✅ Connexion / inscription Better Auth, plugin admin côté client |
-| Dashboard | ✅ Bibliothèque réelle (progression + fiche manhwa), mise à jour optimiste, ajout depuis le catalogue, création au catalogue réservée aux admins |
+| Dashboard | 🚧 Page provisoire « Work in Progress » — UI à reconstruire sur des bases saines |
+| Landing (`/`) | ✅ Conservée |
 | TypeScript | ✅ 0 erreur (`pnpm --filter web typecheck`) |
-| Lint | 🟡 Erreurs historiques restantes sur la landing (`page.tsx`) |
+| Lint | ✅ 0 erreur, 0 avertissement (`pnpm --filter web lint`) |
 | Tests (Vitest + Playwright) | ❌ À mettre en place |
 
 ---
