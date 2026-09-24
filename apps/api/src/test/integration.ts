@@ -10,6 +10,7 @@ import { createDatabase } from '../shared/db/index.js';
 import { user } from '../shared/db/schema.js';
 
 export const TEST_ORIGIN = 'http://localhost:3000';
+export const TEST_SCRAPER_API_KEY = 'integration-tests-scraper-key-0123456789abcdef';
 
 /** App complète (vraie DB de test, vrai Better Auth) + client RPC typé. */
 export function createTestContext() {
@@ -27,6 +28,7 @@ export function createTestContext() {
     services: container.services,
     auth: container.auth,
     corsOrigins: [TEST_ORIGIN],
+    scraperApiKey: TEST_SCRAPER_API_KEY,
     logRequests: false,
   });
 

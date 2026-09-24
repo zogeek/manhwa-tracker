@@ -29,6 +29,11 @@ describe('AppType (Hono RPC contract)', () => {
     expectTypeOf<NonNullable<Progress['data']>['furthestChapter']>().toEqualTypeOf<number>();
   });
 
+  it('keeps machine and auth endpoints out of the web contract', () => {
+    // /api/ingest (clé M2M) et /api/auth (Better Auth) ne font pas partie de AppType.
+    expectTypeOf(client).not.toHaveProperty('api');
+  });
+
   it('exposes typed inputs derived from the Zod validators', () => {
     type NewChapter = InferRequestType<typeof client.chapters.$post>['json'];
     expectTypeOf<NewChapter['number']>().toEqualTypeOf<number>();

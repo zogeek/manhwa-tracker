@@ -3,6 +3,8 @@ import { createAuth, type AuthOptions } from './shared/auth/index.js';
 import { createTransactionRunner } from './shared/db/transaction.js';
 import { DrizzleChapterRepository } from './modules/chapters/chapter.repository.js';
 import { ChapterService } from './modules/chapters/chapter.service.js';
+import { DrizzleIngestionRepository } from './modules/ingestion/ingestion.repository.js';
+import { IngestionService } from './modules/ingestion/ingestion.service.js';
 import { DrizzleManhwaRepository } from './modules/manhwas/manhwa.repository.js';
 import { ManhwaService } from './modules/manhwas/manhwa.service.js';
 import { DrizzleReadingListRepository } from './modules/reading-lists/reading-list.repository.js';
@@ -28,6 +30,9 @@ export function createContainer({ db, auth }: ContainerOptions) {
     progress: new DrizzleReadingProgressRepository(client),
     chapters: new DrizzleChapterRepository(client),
   }));
+  const ingestionTransactions = createTransactionRunner(db, (client) => ({
+    ingestion: new DrizzleIngestionRepository(client),
+  }));
 
   return {
     auth: createAuth({ ...auth, db }),
@@ -38,6 +43,7 @@ export function createContainer({ db, auth }: ContainerOptions) {
       taxonomy: new TaxonomyService(new DrizzleTaxonomyRepository(db)),
       readingProgress: new ReadingProgressService(new DrizzleReadingProgressRepository(db), logReadTransactions),
       readingLists: new ReadingListService(new DrizzleReadingListRepository(db)),
+      ingestion: new IngestionService(new DrizzleIngestionRepository(db), ingestionTransactions),
     },
   };
 }

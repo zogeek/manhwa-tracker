@@ -20,6 +20,7 @@ const app = createApp({
   services: container.services,
   auth: container.auth,
   corsOrigins: env.CORS_ORIGINS,
+  scraperApiKey: env.SCRAPER_API_KEY,
 });
 
 const server = serve({ fetch: app.fetch, port: env.PORT }, (info) => {
