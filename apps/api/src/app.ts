@@ -5,11 +5,11 @@ import { requestId } from 'hono/request-id';
 import { secureHeaders } from 'hono/secure-headers';
 import type { Services } from './container.js';
 import { createChapterRoutes } from './modules/chapters/chapter.route.js';
-import { createGenreRoutes } from './modules/genres/genre.route.js';
 import { createManhwaRoutes } from './modules/manhwas/manhwa.route.js';
 import { createReadingListRoutes } from './modules/reading-lists/reading-list.route.js';
 import { createReadingProgressRoutes } from './modules/reading-progress/reading-progress.route.js';
 import { createSourceRoutes } from './modules/sources/source.route.js';
+import { createTaxonomyRoutes } from './modules/taxonomy/taxonomy.route.js';
 import type { Auth } from './shared/auth/index.js';
 import { errorHandler, notFoundHandler } from './shared/http/error-handler.js';
 import type { AppEnv } from './shared/http/types.js';
@@ -43,7 +43,7 @@ export function createApp({ services, auth, corsOrigins, logRequests = true }: A
     .route('/sources', createSourceRoutes(services.sources, authMiddleware))
     .route('/manhwas', createManhwaRoutes(services.manhwas, authMiddleware))
     .route('/chapters', createChapterRoutes(services.chapters, authMiddleware))
-    .route('/genres', createGenreRoutes(services.genres, authMiddleware))
+    .route('/taxonomy', createTaxonomyRoutes(services.taxonomy, authMiddleware))
     .route('/reading', createReadingProgressRoutes(services.readingProgress, authMiddleware))
     .route('/reading/lists', createReadingListRoutes(services.readingLists, authMiddleware));
 }
