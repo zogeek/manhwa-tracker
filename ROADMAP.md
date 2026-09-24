@@ -144,16 +144,17 @@ Les tables personnelles (`reading_progress`, `chapter_reads`, `reading_lists`) o
 
 ---
 
-## 4. Frontend (`apps/web/`) — ✅ Branché sur l'API
+## 4. Frontend (`apps/web/`) — 🧹 Tabula rasa : projet Next.js vierge, infrastructure conservée
 
 | Élément | État |
 |---|---|
 | Proxy same-origin (`next.config.ts`) | ✅ `/api/auth/*` → Hono `/api/auth/*`, `/api/*` → Hono `/*` (`API_INTERNAL_URL`, figé au build) |
 | Client RPC (`app/lib/api.ts`) | ✅ `hc<AppType>` — `AppType` importé du paquet workspace `api` |
-| Auth (`app/lib/auth-client.ts`, `/login`) | ✅ Connexion / inscription Better Auth, plugin admin côté client |
-| Dashboard | ✅ Bibliothèque réelle (progression + fiche manhwa), mise à jour optimiste, ajout depuis le catalogue, création au catalogue réservée aux admins |
+| Auth (`app/lib/auth-client.ts`) | ✅ Client Better Auth + plugin admin (aucune page de connexion pour l'instant) |
+| UI | 🧹 Supprimée : une seule page `/` (« Projet Vierge »), layout minimal, aucun composant — shadcn (`components.json`) réinstallera les composants un par un |
+| Styles (`app/globals.css`) | ✅ Socle Tailwind v4 + variables de thème shadcn uniquement (config CSS-first, pas de `tailwind.config.ts`) |
 | TypeScript | ✅ 0 erreur (`pnpm --filter web typecheck`) |
-| Lint | 🟡 Erreurs historiques restantes sur la landing (`page.tsx`) |
+| Lint | ✅ 0 erreur, 0 avertissement (`pnpm --filter web lint`) |
 | Tests (Vitest + Playwright) | ❌ À mettre en place |
 
 ---
