@@ -14,6 +14,8 @@ import {
   index,
   uniqueIndex,
   check,
+  smallint,
+  type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 import { relations, sql } from 'drizzle-orm';
 import { user } from './auth-schema.js';
@@ -78,6 +80,35 @@ export const chapterQualityEnum = pgEnum('chapter_quality', [
   'hd',
   'sd',
   'raw',
+]);
+
+export const chapterKindEnum = pgEnum('chapter_kind', [
+  'regular',
+  'extra',
+  'side_story',
+  'prologue',
+  'epilogue',
+  'notice', // annonce de pause, de fin de saison…
+]);
+
+export const termSourceEnum = pgEnum('term_source', [
+  'curated', // posé par un admin
+  'scraper', // déduit par le worker Python
+  'external', // importé d'une base externe (AniList, MAL…)
+]);
+
+export const scrapeRunStatusEnum = pgEnum('scrape_run_status', [
+  'running',
+  'succeeded',
+  'partial', // terminé avec des erreurs sur une partie des éléments
+  'failed',
+]);
+
+export const sourceHealthStatusEnum = pgEnum('source_health_status', [
+  'up',
+  'degraded', // lent ou erreurs intermittentes
+  'blocked', // anti-bot (Cloudflare, Datadome…)
+  'down',
 ]);
 
 export const auditActionEnum = pgEnum('audit_action', [
@@ -160,28 +191,71 @@ export const manhwaAuthors = pgTable('manhwa_authors', {
 ]);
 
 // ============================================================
-// GENRES — Genres (Action, Romance, etc.)
+// TAXONOMIE — Vocabulaires et termes hiérarchiques
 // ============================================================
+// Remplace les anciens `genres` : un vocabulaire (genre, thème, démographie, avertissement…)
+// contient des termes organisés en arbre (parent_id). Les alias permettent au scraper de
+// rattacher « Isekai », « isekai » ou « 異世界 » au même terme.
 
-export const genres = pgTable('genres', {
+export const vocabularies = pgTable('vocabularies', {
   id: uuid('id').defaultRandom().primaryKey(),
+  slug: text('slug').notNull(), // 'genre' | 'theme' | 'demographic' | 'content_warning' | 'format' …
   name: text('name').notNull(),
-  slug: text('slug').notNull(),
-  color: text('color'),
+  description: text('description'),
+  isHierarchical: boolean('is_hierarchical').default(false).notNull(),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
 }, (table) => [
-  uniqueIndex('genres_slug_idx').on(table.slug),
+  uniqueIndex('vocabularies_slug_idx').on(table.slug),
 ]);
 
-export const manhwaGenres = pgTable('manhwa_genres', {
+export const terms = pgTable('terms', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  vocabularyId: uuid('vocabulary_id')
+    .notNull()
+    .references(() => vocabularies.id, { onDelete: 'cascade' }),
+  // RESTRICT : on ne supprime pas un terme qui a encore des enfants (réponse 409).
+  parentId: uuid('parent_id').references((): AnyPgColumn => terms.id, { onDelete: 'restrict' }),
+  slug: text('slug').notNull(),
+  name: text('name').notNull(),
+  description: text('description'),
+  color: text('color'),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (table) => [
+  uniqueIndex('terms_vocabulary_slug_idx').on(table.vocabularyId, table.slug),
+  index('terms_parent_id_idx').on(table.parentId),
+  check('terms_parent_not_self', sql`${table.parentId} IS NULL OR ${table.parentId} <> ${table.id}`),
+]);
+
+export const termAliases = pgTable('term_aliases', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  termId: uuid('term_id')
+    .notNull()
+    .references(() => terms.id, { onDelete: 'cascade' }),
+  alias: text('alias').notNull(),
+  language: text('language'), // null = indépendant de la langue
+}, (table) => [
+  // Recherche insensible à la casse : un alias ne désigne qu'un seul terme par vocabulaire (vérifié côté service).
+  uniqueIndex('term_aliases_term_alias_idx').on(table.termId, sql`lower(${table.alias})`),
+  index('term_aliases_alias_idx').on(sql`lower(${table.alias})`),
+]);
+
+export const manhwaTerms = pgTable('manhwa_terms', {
   manhwaId: uuid('manhwa_id')
     .notNull()
     .references(() => manhwas.id, { onDelete: 'cascade' }),
-  genreId: uuid('genre_id')
+  termId: uuid('term_id')
     .notNull()
-    .references(() => genres.id, { onDelete: 'cascade' }),
+    .references(() => terms.id, { onDelete: 'cascade' }),
+  relevance: smallint('relevance').default(100).notNull(), // 0-100 : poids du tag pour cette œuvre
+  isSpoiler: boolean('is_spoiler').default(false).notNull(),
+  source: termSourceEnum('source').default('curated').notNull(),
+  createdAt: createdAt(),
 }, (table) => [
-  primaryKey({ columns: [table.manhwaId, table.genreId] }),
-  index('manhwa_genres_genre_id_idx').on(table.genreId),
+  primaryKey({ columns: [table.manhwaId, table.termId] }),
+  index('manhwa_terms_term_id_idx').on(table.termId),
+  check('manhwa_terms_relevance_range', sql`${table.relevance} BETWEEN 0 AND 100`),
 ]);
 
 // ============================================================
@@ -220,6 +294,11 @@ export const manhwaSources = pgTable('manhwa_sources', {
   lastScrapedAt: timestamptz('last_scraped_at'),
 }, (table) => [
   uniqueIndex('manhwa_sources_unique_idx').on(table.manhwaId, table.sourceId),
+  // Identité d'une œuvre sur une source : clé de rapprochement utilisée par l'ingestion.
+  uniqueIndex('manhwa_sources_source_url_idx')
+    .on(table.sourceId, table.manhwaUrl)
+    .where(sql`${table.manhwaUrl} IS NOT NULL`),
+  // Index non partiel : requis pour le ON DELETE CASCADE depuis sources.
   index('manhwa_sources_source_id_idx').on(table.sourceId),
 ]);
 
@@ -233,6 +312,7 @@ export const chapters = pgTable('chapters', {
     .notNull()
     .references(() => manhwas.id, { onDelete: 'cascade' }),
   number: chapterNumber('number').notNull(),
+  kind: chapterKindEnum('kind').default('regular').notNull(),
   title: text('title'),
   releaseDate: date('release_date'),
   // Audit
@@ -251,8 +331,30 @@ export const chapters = pgTable('chapters', {
   index('chapters_manhwa_id_idx').on(table.manhwaId),
 ]);
 
-// Pivot table : Un chapitre est disponible sur plusieurs sources
-export const chapterSources = pgTable('chapter_sources', {
+// ============================================================
+// SCANLATION GROUPS — Équipes de traduction
+// ============================================================
+
+export const scanlationGroups = pgTable('scanlation_groups', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  slug: text('slug').notNull(),
+  name: text('name').notNull(),
+  websiteUrl: text('website_url'),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (table) => [
+  uniqueIndex('scanlation_groups_slug_idx').on(table.slug),
+]);
+
+// ============================================================
+// CHAPTER RELEASES — Parutions concrètes d'un chapitre canonique
+// ============================================================
+// `chapters` = le chapitre en tant qu'œuvre (numéro 42 de Solo Leveling).
+// `chapter_releases` = une mise en ligne précise : telle source, telle langue, telle équipe,
+// telle URL. Un même chapitre a donc N parutions. L'URL identifie la parution sur sa source
+// (clé d'upsert idempotente pour le scraper).
+
+export const chapterReleases = pgTable('chapter_releases', {
   id: uuid('id').defaultRandom().primaryKey(),
   chapterId: uuid('chapter_id')
     .notNull()
@@ -260,13 +362,19 @@ export const chapterSources = pgTable('chapter_sources', {
   sourceId: uuid('source_id')
     .notNull()
     .references(() => sources.id, { onDelete: 'cascade' }),
-  url: text('url').notNull(), // Lien direct vers le chapitre
-  quality: chapterQualityEnum('quality').default('hd').notNull(),
+  scanlationGroupId: uuid('scanlation_group_id')
+    .references(() => scanlationGroups.id, { onDelete: 'set null' }),
+  url: text('url').notNull(),
   language: text('language').default('fr').notNull(),
-  scrapedAt: timestamptz('scraped_at').defaultNow().notNull(),
+  quality: chapterQualityEnum('quality').default('hd').notNull(),
+  publishedAt: timestamptz('published_at'), // date annoncée par la source
+  firstSeenAt: timestamptz('first_seen_at').defaultNow().notNull(), // première détection par le scraper
+  lastSeenAt: timestamptz('last_seen_at').defaultNow().notNull(), // dernière détection (preuve de vie)
+  removedAt: timestamptz('removed_at'), // disparue de la source (DMCA, retrait…)
 }, (table) => [
-  uniqueIndex('chapter_sources_unique_idx').on(table.chapterId, table.sourceId, table.language),
-  index('chapter_sources_source_id_idx').on(table.sourceId),
+  uniqueIndex('chapter_releases_source_url_idx').on(table.sourceId, table.url),
+  index('chapter_releases_chapter_id_idx').on(table.chapterId),
+  index('chapter_releases_scanlation_group_id_idx').on(table.scanlationGroupId),
 ]);
 
 // ============================================================
@@ -301,7 +409,8 @@ export const manhwaCovers = pgTable('manhwa_covers', {
   isPrimary: boolean('is_primary').default(false).notNull(),
   createdAt: createdAt(),
 }, (table) => [
-  index('manhwa_covers_manhwa_id_idx').on(table.manhwaId),
+  // Une même image n'est enregistrée qu'une fois par manhwa (upsert idempotent de l'ingestion).
+  uniqueIndex('manhwa_covers_manhwa_image_idx').on(table.manhwaId, table.imageUrl),
   // Une seule couverture principale par manhwa
   uniqueIndex('manhwa_covers_one_primary_idx').on(table.manhwaId).where(sql`${table.isPrimary}`),
 ]);
@@ -403,6 +512,81 @@ export const readingListItems = pgTable('reading_list_items', {
 ]);
 
 // ============================================================
+// SCRAPER — Télémétrie des exécutions et santé des sources
+// ============================================================
+
+export type ScrapeRunStats = {
+  manhwasSeen?: number;
+  chaptersSeen?: number;
+  releasesCreated?: number;
+  errors?: number;
+  [key: string]: number | undefined;
+};
+
+export const scrapeRuns = pgTable('scrape_runs', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  sourceId: uuid('source_id')
+    .notNull()
+    .references(() => sources.id, { onDelete: 'cascade' }),
+  status: scrapeRunStatusEnum('status').default('running').notNull(),
+  workerVersion: text('worker_version'),
+  startedAt: timestamptz('started_at').defaultNow().notNull(),
+  finishedAt: timestamptz('finished_at'),
+  stats: jsonb('stats').$type<ScrapeRunStats>(),
+  error: text('error'),
+}, (table) => [
+  index('scrape_runs_source_started_idx').on(table.sourceId, table.startedAt),
+  check('scrape_runs_finished_after_start', sql`${table.finishedAt} IS NULL OR ${table.finishedAt} >= ${table.startedAt}`),
+]);
+
+// Série temporelle : un échantillon par vérification d'une source.
+export const sourceHealth = pgTable('source_health', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  sourceId: uuid('source_id')
+    .notNull()
+    .references(() => sources.id, { onDelete: 'cascade' }),
+  scrapeRunId: uuid('scrape_run_id').references(() => scrapeRuns.id, { onDelete: 'set null' }),
+  status: sourceHealthStatusEnum('status').notNull(),
+  httpStatus: smallint('http_status'),
+  latencyMs: integer('latency_ms'),
+  blockedBy: text('blocked_by'), // 'cloudflare' | 'datadome' | …
+  checkedAt: timestamptz('checked_at').defaultNow().notNull(),
+}, (table) => [
+  index('source_health_source_checked_idx').on(table.sourceId, table.checkedAt),
+  check('source_health_latency_positive', sql`${table.latencyMs} IS NULL OR ${table.latencyMs} >= 0`),
+]);
+
+// ============================================================
+// INGESTION — Journal d'idempotence des lots envoyés par le scraper
+// ============================================================
+// Chaque lot porte une clé d'idempotence (header `Idempotency-Key`). Rejouer la même clé
+// renvoie le résultat enregistré au lieu de retraiter le lot ; la même clé avec un contenu
+// différent est refusée (409).
+
+export type IngestionBatchResult = {
+  manhwas: { sourceManhwaUrl: string; manhwaId: string; created: boolean }[];
+  chaptersCreated: number;
+  releasesCreated: number;
+  releasesUpdated: number;
+  coversAdded: number;
+};
+
+export const ingestionBatches = pgTable('ingestion_batches', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  idempotencyKey: text('idempotency_key').notNull(),
+  requestHash: text('request_hash').notNull(), // SHA-256 du lot validé
+  sourceId: uuid('source_id')
+    .notNull()
+    .references(() => sources.id, { onDelete: 'cascade' }),
+  scrapeRunId: uuid('scrape_run_id').references(() => scrapeRuns.id, { onDelete: 'set null' }),
+  result: jsonb('result').$type<IngestionBatchResult>().notNull(),
+  receivedAt: createdAt(),
+}, (table) => [
+  uniqueIndex('ingestion_batches_idempotency_key_idx').on(table.idempotencyKey),
+  index('ingestion_batches_scrape_run_id_idx').on(table.scrapeRunId),
+]);
+
+// ============================================================
 // AUDIT LOGS — Journal centralisé de toutes les actions
 // ============================================================
 // Chaque mutation (create/update/delete) sur une entité crée une entrée.
@@ -440,7 +624,7 @@ export const auditLogs = pgTable('audit_logs', {
 export const manhwasRelations = relations(manhwas, ({ many }) => ({
   titles: many(manhwaTitles),
   authors: many(manhwaAuthors),
-  genres: many(manhwaGenres),
+  terms: many(manhwaTerms),
   chapters: many(chapters),
   sources: many(manhwaSources),
   covers: many(manhwaCovers),
@@ -471,25 +655,49 @@ export const manhwaAuthorsRelations = relations(manhwaAuthors, ({ one }) => ({
   }),
 }));
 
-export const genresRelations = relations(genres, ({ many }) => ({
-  manhwas: many(manhwaGenres),
+export const vocabulariesRelations = relations(vocabularies, ({ many }) => ({
+  terms: many(terms),
 }));
 
-export const manhwaGenresRelations = relations(manhwaGenres, ({ one }) => ({
+export const termsRelations = relations(terms, ({ one, many }) => ({
+  vocabulary: one(vocabularies, {
+    fields: [terms.vocabularyId],
+    references: [vocabularies.id],
+  }),
+  parent: one(terms, {
+    fields: [terms.parentId],
+    references: [terms.id],
+    relationName: 'term_hierarchy',
+  }),
+  children: many(terms, { relationName: 'term_hierarchy' }),
+  aliases: many(termAliases),
+  manhwas: many(manhwaTerms),
+}));
+
+export const termAliasesRelations = relations(termAliases, ({ one }) => ({
+  term: one(terms, {
+    fields: [termAliases.termId],
+    references: [terms.id],
+  }),
+}));
+
+export const manhwaTermsRelations = relations(manhwaTerms, ({ one }) => ({
   manhwa: one(manhwas, {
-    fields: [manhwaGenres.manhwaId],
+    fields: [manhwaTerms.manhwaId],
     references: [manhwas.id],
   }),
-  genre: one(genres, {
-    fields: [manhwaGenres.genreId],
-    references: [genres.id],
+  term: one(terms, {
+    fields: [manhwaTerms.termId],
+    references: [terms.id],
   }),
 }));
 
 export const sourcesRelations = relations(sources, ({ many }) => ({
   manhwas: many(manhwaSources),
-  chapterSources: many(chapterSources),
+  chapterReleases: many(chapterReleases),
   chapterReads: many(chapterReads),
+  scrapeRuns: many(scrapeRuns),
+  health: many(sourceHealth),
 }));
 
 export const manhwaSourcesRelations = relations(manhwaSources, ({ one }) => ({
@@ -508,18 +716,57 @@ export const chaptersRelations = relations(chapters, ({ one, many }) => ({
     fields: [chapters.manhwaId],
     references: [manhwas.id],
   }),
-  sources: many(chapterSources),
+  releases: many(chapterReleases),
   reads: many(chapterReads),
 }));
 
-export const chapterSourcesRelations = relations(chapterSources, ({ one }) => ({
+export const scanlationGroupsRelations = relations(scanlationGroups, ({ many }) => ({
+  releases: many(chapterReleases),
+}));
+
+export const chapterReleasesRelations = relations(chapterReleases, ({ one }) => ({
   chapter: one(chapters, {
-    fields: [chapterSources.chapterId],
+    fields: [chapterReleases.chapterId],
     references: [chapters.id],
   }),
   source: one(sources, {
-    fields: [chapterSources.sourceId],
+    fields: [chapterReleases.sourceId],
     references: [sources.id],
+  }),
+  scanlationGroup: one(scanlationGroups, {
+    fields: [chapterReleases.scanlationGroupId],
+    references: [scanlationGroups.id],
+  }),
+}));
+
+export const scrapeRunsRelations = relations(scrapeRuns, ({ one, many }) => ({
+  source: one(sources, {
+    fields: [scrapeRuns.sourceId],
+    references: [sources.id],
+  }),
+  health: many(sourceHealth),
+  batches: many(ingestionBatches),
+}));
+
+export const sourceHealthRelations = relations(sourceHealth, ({ one }) => ({
+  source: one(sources, {
+    fields: [sourceHealth.sourceId],
+    references: [sources.id],
+  }),
+  scrapeRun: one(scrapeRuns, {
+    fields: [sourceHealth.scrapeRunId],
+    references: [scrapeRuns.id],
+  }),
+}));
+
+export const ingestionBatchesRelations = relations(ingestionBatches, ({ one }) => ({
+  source: one(sources, {
+    fields: [ingestionBatches.sourceId],
+    references: [sources.id],
+  }),
+  scrapeRun: one(scrapeRuns, {
+    fields: [ingestionBatches.scrapeRunId],
+    references: [scrapeRuns.id],
   }),
 }));
 

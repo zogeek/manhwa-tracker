@@ -26,14 +26,40 @@ export async function seedCatalog(db: Database) {
     .insert(schema.chapters)
     .values([1, 2, 2.5, 3].map((number) => ({ manhwaId: manhwa.id, number })))
     .returning();
-  const genre = firstOrThrow(
-    await db.insert(schema.genres).values({ name: 'Action', slug: 'action' }).returning(),
+  // Taxonomie : vocabulaire hiérarchique « genre » avec Action > Martial arts, et un vocabulaire plat.
+  const genreVocabulary = firstOrThrow(
+    await db.insert(schema.vocabularies).values({ slug: 'genre', name: 'Genres', isHierarchical: true }).returning(),
   );
-  await db.insert(schema.manhwaGenres).values({ manhwaId: manhwa.id, genreId: genre.id });
+  const themeVocabulary = firstOrThrow(
+    await db.insert(schema.vocabularies).values({ slug: 'theme', name: 'Thèmes' }).returning(),
+  );
+  const action = firstOrThrow(
+    await db.insert(schema.terms).values({ vocabularyId: genreVocabulary.id, slug: 'action', name: 'Action' }).returning(),
+  );
+  const martialArts = firstOrThrow(
+    await db
+      .insert(schema.terms)
+      .values({ vocabularyId: genreVocabulary.id, parentId: action.id, slug: 'martial-arts', name: 'Martial arts' })
+      .returning(),
+  );
+  await db.insert(schema.manhwaTerms).values({ manhwaId: manhwa.id, termId: action.id });
+
+  const source = firstOrThrow(
+    await db.insert(schema.sources).values({ name: 'Asura Scans', baseUrl: 'https://asura.example' }).returning(),
+  );
+  const otherSource = firstOrThrow(
+    await db.insert(schema.sources).values({ name: 'Phenix Scans', baseUrl: 'https://phenix.example' }).returning(),
+  );
 
   const chapterByNumber = (number: number) => firstOrThrow(chapters.filter((chapter) => chapter.number === number));
 
-  return { manhwa, genre, chapterByNumber };
+  return {
+    manhwa,
+    chapterByNumber,
+    taxonomy: { genreVocabulary, themeVocabulary, action, martialArts },
+    source,
+    otherSource,
+  };
 }
 
 export type SeededCatalog = Awaited<ReturnType<typeof seedCatalog>>;

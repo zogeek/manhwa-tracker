@@ -20,6 +20,7 @@ const app = createApp({
   services: container.services,
   auth: container.auth,
   corsOrigins: ['http://localhost:3000'],
+  scraperApiKey: 'unit-tests-scraper-key-0123456789abcdef0123',
   logRequests: false,
 });
 
@@ -77,6 +78,16 @@ describe('app (HTTP layer, no database)', () => {
     expect(res.status).toBe(401);
     const body = await readError(res);
     expect(body.error.code).toBe('UNAUTHORIZED');
+  });
+
+  it('rejects machine calls without a valid API key', async () => {
+    const res = await app.request('/api/ingest/runs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': 'wrong-key' },
+      body: '{}',
+    });
+
+    expect(res.status).toBe(401);
   });
 
   it('ignores the legacy x-user-id header', async () => {

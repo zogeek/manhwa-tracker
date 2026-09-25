@@ -16,8 +16,8 @@ describe('AppType (Hono RPC contract)', () => {
     type Chapters = InferResponseType<typeof client.chapters.$get, 200>;
     expectTypeOf<Chapters['data'][number]['number']>().toEqualTypeOf<number>();
 
-    type Genres = InferResponseType<typeof client.genres.$get, 200>;
-    expectTypeOf<Genres['data'][number]['slug']>().toEqualTypeOf<string>();
+    type Terms = InferResponseType<(typeof client.taxonomy.vocabularies)[':slug']['terms']['$get'], 200>;
+    expectTypeOf<Terms['data'][number]['parentId']>().toEqualTypeOf<string | null>();
 
     type Sources = InferResponseType<typeof client.sources.$get, 200>;
     expectTypeOf<Sources['data'][number]['baseUrl']>().toEqualTypeOf<string>();
@@ -27,6 +27,11 @@ describe('AppType (Hono RPC contract)', () => {
 
     type Progress = InferResponseType<(typeof client.reading.progress)[':manhwaId']['$get'], 200>;
     expectTypeOf<NonNullable<Progress['data']>['furthestChapter']>().toEqualTypeOf<number>();
+  });
+
+  it('keeps machine and auth endpoints out of the web contract', () => {
+    // /api/ingest (clé M2M) et /api/auth (Better Auth) ne font pas partie de AppType.
+    expectTypeOf(client).not.toHaveProperty('api');
   });
 
   it('exposes typed inputs derived from the Zod validators', () => {

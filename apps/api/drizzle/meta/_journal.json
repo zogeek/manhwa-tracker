@@ -22,6 +22,20 @@
       "when": 1790201652069,
       "tag": "0002_auth_admin_plugin",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1790280995485,
+      "tag": "0003_scraping_and_taxonomy",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1790280996581,
+      "tag": "0004_drop_legacy_genres_and_chapter_sources",
+      "breakpoints": true
     }
   ]
 }

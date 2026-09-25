@@ -3,8 +3,8 @@ import { createAuth, type AuthOptions } from './shared/auth/index.js';
 import { createTransactionRunner } from './shared/db/transaction.js';
 import { DrizzleChapterRepository } from './modules/chapters/chapter.repository.js';
 import { ChapterService } from './modules/chapters/chapter.service.js';
-import { DrizzleGenreRepository } from './modules/genres/genre.repository.js';
-import { GenreService } from './modules/genres/genre.service.js';
+import { DrizzleIngestionRepository } from './modules/ingestion/ingestion.repository.js';
+import { IngestionService } from './modules/ingestion/ingestion.service.js';
 import { DrizzleManhwaRepository } from './modules/manhwas/manhwa.repository.js';
 import { ManhwaService } from './modules/manhwas/manhwa.service.js';
 import { DrizzleReadingListRepository } from './modules/reading-lists/reading-list.repository.js';
@@ -13,6 +13,8 @@ import { DrizzleReadingProgressRepository } from './modules/reading-progress/rea
 import { ReadingProgressService } from './modules/reading-progress/reading-progress.service.js';
 import { DrizzleSourceRepository } from './modules/sources/source.repository.js';
 import { SourceService } from './modules/sources/source.service.js';
+import { DrizzleTaxonomyRepository } from './modules/taxonomy/taxonomy.repository.js';
+import { TaxonomyService } from './modules/taxonomy/taxonomy.service.js';
 
 export type ContainerOptions = {
   db: Database;
@@ -28,6 +30,9 @@ export function createContainer({ db, auth }: ContainerOptions) {
     progress: new DrizzleReadingProgressRepository(client),
     chapters: new DrizzleChapterRepository(client),
   }));
+  const ingestionTransactions = createTransactionRunner(db, (client) => ({
+    ingestion: new DrizzleIngestionRepository(client),
+  }));
 
   return {
     auth: createAuth({ ...auth, db }),
@@ -35,9 +40,10 @@ export function createContainer({ db, auth }: ContainerOptions) {
       sources: new SourceService(new DrizzleSourceRepository(db)),
       manhwas: new ManhwaService(new DrizzleManhwaRepository(db)),
       chapters: new ChapterService(new DrizzleChapterRepository(db)),
-      genres: new GenreService(new DrizzleGenreRepository(db)),
+      taxonomy: new TaxonomyService(new DrizzleTaxonomyRepository(db)),
       readingProgress: new ReadingProgressService(new DrizzleReadingProgressRepository(db), logReadTransactions),
       readingLists: new ReadingListService(new DrizzleReadingListRepository(db)),
+      ingestion: new IngestionService(new DrizzleIngestionRepository(db), ingestionTransactions),
     },
   };
 }

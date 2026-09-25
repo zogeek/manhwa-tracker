@@ -8,6 +8,7 @@ export type ErrorCode =
   | 'NOT_FOUND'
   | 'CONFLICT'
   | 'UNPROCESSABLE_ENTITY'
+  | 'PAYLOAD_TOO_LARGE'
   | 'INTERNAL_ERROR';
 
 export type ErrorDetail = {
@@ -68,5 +69,11 @@ export class ConflictError extends AppError {
 export class UnprocessableEntityError extends AppError {
   constructor(message: string, options?: ErrorOptions) {
     super(422, 'UNPROCESSABLE_ENTITY', message, undefined, options);
+  }
+}
+
+export class PayloadTooLargeError extends AppError {
+  constructor(message = 'Payload too large') {
+    super(413, 'PAYLOAD_TOO_LARGE', message);
   }
 }

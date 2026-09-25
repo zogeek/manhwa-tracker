@@ -1,6 +1,6 @@
 # 📖 Manhwa Tracker — État du Projet
 
-> Dernière mise à jour : 24 septembre 2026 — branche `feat/frontend-and-admin`
+> Dernière mise à jour : 24 septembre 2026 — branche `feat/advanced-db-and-ingestion`
 
 ---
 
@@ -99,7 +99,7 @@ Tests à côté du code : `*.service.spec.ts` (unitaires, repository en mémoire
 ### 3.3 Endpoints
 
 **Conventions** : succès `{ data }` · erreurs `{ error: { code, message, details? } }` · `DELETE` → `204`.
-🔒 = session Better Auth obligatoire (`requireAuth`). 👑 = rôle `admin` requis (`requireAdmin` : 401 sans session, 403 sans rôle). L'identité provient **uniquement** de la session.
+🔒 = session Better Auth obligatoire (`requireAuth`). 🤖 = clé d'API machine (`requireApiKey`, `SCRAPER_API_KEY`). 👑 = rôle `admin` requis (`requireAdmin` : 401 sans session, 403 sans rôle). L'identité provient **uniquement** de la session.
 Premier admin : `pnpm --filter api admin:promote <email>`.
 
 | Module | Lecture publique | 🔒 Protégé |
@@ -108,27 +108,28 @@ Premier admin : `pnpm --filter api admin:promote <email>`.
 | **Sources** `/sources` | `GET /`, `GET /:id` | 👑 `POST /`, `PATCH /:id`, `DELETE /:id` (soft) |
 | **Manhwas** `/manhwas` | `GET /`, `GET /:id` | 👑 `POST /`, `PATCH /:id`, `DELETE /:id` (soft) |
 | **Chapters** `/chapters` | `GET /`, `GET /manhwa/:manhwaId`, `GET /:id` | 👑 `POST /`, `PATCH /:id`, `DELETE /:id` (soft) |
-| **Genres** `/genres` | `GET /`, `GET /:id` | 👑 `POST /`, `PATCH /:id`, `DELETE /:id` (hard, cascade pivot) |
+| **Taxonomie** `/taxonomy` | `GET /vocabularies`, `GET /vocabularies/:slug/terms`, `GET /manhwas/:manhwaId/terms` | 👑 `POST /vocabularies`, `POST /terms`, `PATCH /terms/:id` (anti-cycle), `DELETE /terms/:id` (409 si enfants), `PUT`/`DELETE /manhwas/:manhwaId/terms/:termId` |
+| **Ingestion** `/api/ingest` (M2M) | — | 🤖 clé `x-api-key` : `POST /runs`, `PATCH /runs/:id`, `POST /health`, `POST /batches` (idempotent, `Idempotency-Key`) — hors `AppType` |
 | **Progression** `/reading` | — | `GET /progress` (bibliothèque, manhwa inclus), `GET /progress/:manhwaId`, `PUT /progress/:manhwaId`, `DELETE /progress/:manhwaId`, `POST /reads` (lecture + progression atomiques), `GET /reads`, `GET /reads/:manhwaId` |
 | **Listes** `/reading/lists` | — | `GET /`, `GET /:id` (avec items), `POST /`, `PATCH /:id`, `DELETE /:id`, `POST /:id/items`, `DELETE /:id/items/:manhwaId` — **403 si non propriétaire** |
 
-### 3.4 Schéma DB (21 tables)
+### 3.4 Schéma DB (27 tables)
 
-17 tables métier + 4 tables Better Auth (`user`, `session`, `account`, `verification`, générées par `pnpm --filter api auth:generate`).
+23 tables métier + 4 tables Better Auth (`user`, `session`, `account`, `verification`, générées par `pnpm --filter api auth:generate`).
 Les tables personnelles (`reading_progress`, `chapter_reads`, `reading_lists`) ont une FK `user_id → user.id` (cascade).
 
-| Table | Soft delete | Module API |
+| Domaine | Tables | Module API |
 |---|---|---|
-| `manhwas` | ✅ | manhwas |
-| `manhwa_titles`, `authors`, `manhwa_authors`, `manhwa_sources`, `chapter_sources`, `external_links`, `manhwa_covers` | — | ❌ pas encore de module |
-| `genres` / `manhwa_genres` | ❌ (hard) | genres |
-| `sources` | ✅ | sources |
-| `chapters` | ✅ | chapters |
-| `reading_progress`, `chapter_reads` | — | reading-progress |
-| `reading_lists` / `reading_list_items` | ✅ / — | reading-lists |
-| `audit_logs` | — | ❌ (admin, lecture seule — à venir) |
-| `user`, `session`, `account`, `verification` | — | Better Auth |
+| Catalogue | `manhwas` (soft delete), `manhwa_titles`, `authors`, `manhwa_authors`, `manhwa_covers`, `external_links` | manhwas (titres, auteurs, liens : ❌ pas encore de module) |
+| Taxonomie | `vocabularies`, `terms` (arbre via `parent_id`, anti-cycle), `term_aliases`, `manhwa_terms` (pertinence, spoiler, provenance) | taxonomy |
+| Sources & chapitres | `sources` (soft delete), `manhwa_sources`, `chapters` (canonique, `kind`), `chapter_releases` (parution : source, langue, équipe, URL), `scanlation_groups` | sources, chapters, ingestion |
+| Scraper | `scrape_runs`, `source_health` (série temporelle), `ingestion_batches` (journal d'idempotence) | ingestion (M2M) |
+| Lecture | `reading_progress`, `chapter_reads`, `reading_lists` (soft delete), `reading_list_items` | reading-progress, reading-lists |
+| Audit | `audit_logs` | ❌ (admin, lecture seule — à venir) |
+| Auth | `user`, `session`, `account`, `verification` | Better Auth |
 
+> Migrations `0003`/`0004` : les anciens `genres`/`manhwa_genres` sont repris dans le vocabulaire hiérarchique `genre`, et `chapter_sources` dans `chapter_releases`, avant suppression.
+>
 > Le plugin admin ajoute `role`, `banned`, `ban_reason`, `ban_expires` à `user` et `impersonated_by` à `session` (migration `0002_auth_admin_plugin`).
 >
 > ⚠️ Les tables Better Auth utilisent `timestamp` sans fuseau (sortie du CLI, non modifiable à la main par règle) — exception assumée à la règle `timestamptz`.
@@ -137,9 +138,9 @@ Les tables personnelles (`reading_progress`, `chapter_reads`, `reading_lists`) o
 
 | Métrique | Valeur |
 |---|---|
-| Fichiers TypeScript API (hors tests) | 47 |
+| Fichiers TypeScript API (hors tests) | 54 |
 | `any` / type casts | 0 |
-| Tests | 37 (unitaires + intégration sur Postgres éphémère) |
+| Tests | 73 (unitaires + intégration sur Postgres éphémère) |
 | Commandes | `pnpm --filter api typecheck` · `test` · `test:unit` · `test:integration` · `build` |
 
 ---
@@ -178,6 +179,8 @@ Worker Python isolé (FastAPI/Playwright) qui poussera ses données vers l'API H
 - Infrastructure de tests : Vitest (unit + intégration testcontainers), seed isolé
 - Rôle admin (plugin Better Auth) : mutations du catalogue réservées aux admins
 - Frontend reconnecté : proxy Next.js, login/inscription, dashboard sur le RPC typé (0 erreur TS)
+- Schéma avancé : chapitres canoniques / parutions, équipes, taxonomie hiérarchique, télémétrie scraper
+- API d'ingestion M2M (`/api/ingest`, clé d'API, lots idempotents et atomiques)
 
 ### 🔴 Priorité suivante — Sécurité & robustesse API
 
@@ -185,7 +188,7 @@ Worker Python isolé (FastAPI/Playwright) qui poussera ses données vers l'API H
 |---|---|
 | Pagination cursor-based sur les `GET` de liste | `GET /chapters` renvoie toute la table |
 | CI GitHub Actions (typecheck → test → build, drift check des migrations) | Règle CLAUDE.md |
-| Clé de service pour le scraper | Ingestion séparée des routes du client web |
+| Durcir l'auth du scraper (signature HMAC horodatée ou mTLS, rotation de clé) | La clé statique `x-api-key` est un premier niveau (cf. CLAUDE.md) |
 
 ### 🟠 Tables pivot / enrichissement
 
@@ -201,4 +204,4 @@ Architecture du worker, première source, planification, ingestion via l'API.
 
 ### 🔵 Évolutions DB proposées (non validées)
 
-Parutions de chapitres par source (`chapter_releases`), historique de scraping, télémétrie de lecture partitionnée, taxonomie hiérarchique, audit par triggers, PostgreSQL 18 (`uuidv7()`).
+Télémétrie de lecture partitionnée (sessions / événements), rapprochement flou des titres (`pg_trgm`) et file de validation, ingestion des tags via `term_aliases`, audit par triggers, PostgreSQL 18 (`uuidv7()`).
