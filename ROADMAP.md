@@ -145,10 +145,21 @@ Les tables personnelles (`reading_progress`, `chapter_reads`, `reading_lists`) o
 
 ---
 
-## 4. Frontend (`apps/web/`) — 🧹 Tabula rasa : projet Next.js vierge, infrastructure conservée
+## 4. Frontend (`apps/web/`) — 🟢 Squelette applicatif (layout, navigation, auth)
 
 | Élément | État |
 |---|---|
+| Proxy same-origin (`next.config.ts`) | ✅ `/api/auth/*` → Hono `/api/auth/*` ; `/api/<ressource>/*` → Hono `/<ressource>/*` **uniquement pour la liste blanche** `PUBLIC_API_RESOURCES` (`app/lib/api-routes.ts`, dérivée de `AppType` et vérifiée au typecheck). `/api/ingest` (M2M) n'est jamais relayé, y compris sous forme encodée |
+| Protection des pages | ✅ `proxy.ts` : redirection optimiste vers `/login` sans cookie de session ; `verifySession()` (DAL `server-only`, `app/lib/dal.ts`) vérifie réellement la session dans chaque page |
+| Client RPC (`app/lib/api.ts`) | ✅ `hc<AppType>` — appels serveur au nom de l'utilisateur via `getForwardedAuthHeaders()` |
+| Auth | ✅ `/login` (connexion / inscription), menu utilisateur (`useSession`) avec déconnexion |
+| Layout | ✅ Sidebar shadcn repliable (Catalogue, Ma Bibliothèque, Paramètres) + header |
+| Pages | ✅ Accueil (bienvenue personnalisée + statistiques), Catalogue (liste serveur) ; 🚧 Ma Bibliothèque, Paramètres (lecture seule) |
+| UI (`components/ui`) | ✅ shadcn (style `radix-nova`) : button, card, input, label, field, dropdown-menu, sidebar, avatar, separator, sheet, tooltip, skeleton |
+| TypeScript / Lint | ✅ 0 erreur, 0 avertissement |
+| Tests (Vitest + Playwright) | ❌ À mettre en place |
+
+---|---|
 | Proxy same-origin (`next.config.ts`) | ✅ `/api/auth/*` → Hono `/api/auth/*`, `/api/*` → Hono `/*` (`API_INTERNAL_URL`, figé au build) |
 | Client RPC (`app/lib/api.ts`) | ✅ `hc<AppType>` — `AppType` importé du paquet workspace `api` |
 | Auth (`app/lib/auth-client.ts`) | ✅ Client Better Auth + plugin admin (aucune page de connexion pour l'instant) |
@@ -196,7 +207,7 @@ Routes pour `manhwa_titles`, `manhwa_authors`, `manhwa_genres`, `manhwa_sources`
 
 ### 🟡 Frontend
 
-Vitest (composants) + Playwright (E2E), protection des routes côté serveur (middleware Next), fiche manhwa détaillée, gestion des listes personnalisées, erreurs de lint de la landing.
+Vitest (composants) + Playwright (E2E), page Ma Bibliothèque (progression, mise à jour), fiche manhwa détaillée, ajout au suivi depuis le catalogue, gestion des listes personnalisées, édition du profil.
 
 ### 🟤 Scraper
 
