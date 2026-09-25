@@ -145,7 +145,7 @@ Les tables personnelles (`reading_progress`, `chapter_reads`, `reading_lists`) o
 
 ---
 
-## 4. Frontend (`apps/web/`) — 🟢 Squelette applicatif (layout, navigation, auth)
+## 4. Frontend (`apps/web/`) — 🟢 Catalogue et bibliothèque fonctionnels
 
 | Élément | État |
 |---|---|
@@ -154,8 +154,10 @@ Les tables personnelles (`reading_progress`, `chapter_reads`, `reading_lists`) o
 | Client RPC (`app/lib/api.ts`) | ✅ `hc<AppType>` — appels serveur au nom de l'utilisateur via `getForwardedAuthHeaders()` |
 | Auth | ✅ `/login` (connexion / inscription), menu utilisateur (`useSession`) avec déconnexion |
 | Layout | ✅ Sidebar shadcn repliable (Catalogue, Ma Bibliothèque, Paramètres) + header |
-| Pages | ✅ Accueil (bienvenue personnalisée + statistiques), Catalogue (liste serveur) ; 🚧 Ma Bibliothèque, Paramètres (lecture seule) |
-| UI (`components/ui`) | ✅ shadcn (style `radix-nova`) : button, card, input, label, field, dropdown-menu, sidebar, avatar, separator, sheet, tooltip, skeleton |
+| Pages | ✅ Accueil (bienvenue + statistiques), Catalogue (grille de `ManhwaCard` + bouton « Ajouter à ma bibliothèque »), Ma Bibliothèque (groupée par statut, +1 chapitre, changement de statut, mises à jour optimistes) ; 🚧 Paramètres (lecture seule) |
+| Types front | ✅ Déduits du contrat RPC (`app/lib/api-types.ts`, `InferResponseType`/`InferRequestType`) — aucune interface dupliquée ; libellés FR exhaustifs par enum (`app/lib/labels.ts`) |
+| Mutations client | ✅ Hook `useApiMutation` : appel Hono RPC via le proxy, transition React + `router.refresh()`, erreurs affichées (401/403/réseau) |
+| UI (`components/ui`) | ✅ shadcn (style `radix-nova`, alias `utils` → paquet `cn`) : badge, button, card, input, label, field, dropdown-menu, select, sidebar, avatar, separator, sheet, tooltip, skeleton |
 | TypeScript / Lint | ✅ 0 erreur, 0 avertissement |
 | Tests (Vitest + Playwright) | ❌ À mettre en place |
 
@@ -207,7 +209,7 @@ Routes pour `manhwa_titles`, `manhwa_authors`, `manhwa_genres`, `manhwa_sources`
 
 ### 🟡 Frontend
 
-Vitest (composants) + Playwright (E2E), page Ma Bibliothèque (progression, mise à jour), fiche manhwa détaillée, ajout au suivi depuis le catalogue, gestion des listes personnalisées, édition du profil.
+Vitest (composants) + Playwright (E2E), tags de genre sur les cartes (embarquer les termes dans `GET /manhwas` pour éviter N+1 requêtes), pagination cursor du catalogue, fiche manhwa détaillée, retrait de la bibliothèque, gestion des listes personnalisées, édition du profil.
 
 ### 🟤 Scraper
 
