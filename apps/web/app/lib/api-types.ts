@@ -16,3 +16,25 @@ export type ProgressPatch = InferRequestType<(typeof api.reading.progress)[":man
 export type ReadingStatus = LibraryEntry["status"];
 export type ManhwaType = CatalogManhwa["type"];
 export type PublicationStatus = CatalogManhwa["status"];
+
+/** Réponse de `GET /manhwas/search` : résultats locaux, externes et état de chaque fournisseur. */
+export type CatalogSearch = InferResponseType<typeof api.manhwas.search.$get, 200>["data"];
+export type LocalSearchHit = CatalogSearch["local"][number];
+export type ExternalSearchHit = CatalogSearch["external"][number];
+export type ExternalProvider = ExternalSearchHit["provider"];
+export type ProviderReport = CatalogSearch["providers"][number];
+
+/** Fiche complète (`GET /manhwas/:id`). */
+export type ManhwaDetail = InferResponseType<(typeof api.manhwas)[":id"]["$get"], 200>["data"];
+
+/** Tag d'une œuvre avec son terme et son vocabulaire (`GET /taxonomy/manhwas/:manhwaId/terms`). */
+export type ManhwaTag = InferResponseType<
+  (typeof api.taxonomy.manhwas)[":manhwaId"]["terms"]["$get"],
+  200
+>["data"][number];
+
+/** Chapitre canonique (`GET /chapters/manhwa/:manhwaId`). */
+export type Chapter = InferResponseType<(typeof api.chapters.manhwa)[":manhwaId"]["$get"], 200>["data"][number];
+
+/** Progression de l'utilisateur sur une œuvre, `null` si elle n'est pas dans sa bibliothèque. */
+export type ReadingProgress = InferResponseType<(typeof api.reading.progress)[":manhwaId"]["$get"], 200>["data"];

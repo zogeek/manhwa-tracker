@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { api } from "@/app/lib/api";
 import type { LibraryEntry, ProgressPatch } from "@/app/lib/api-types";
+import { formatChapter } from "@/app/lib/format";
 import { READING_STATUS_LABELS, READING_STATUSES } from "@/app/lib/labels";
 import { useApiMutation } from "@/hooks/use-api-mutation";
 
@@ -14,8 +15,6 @@ type LibraryEntryControlsProps = {
     manhwa: Pick<LibraryEntry["manhwa"], "title" | "totalChapters">;
   };
 };
-
-const formatChapter = (chapter: number) => chapter.toLocaleString("fr-FR", { maximumFractionDigits: 2 });
 
 // Client Component : +1 chapitre et changement de statut, avec retour visuel immédiat (optimiste).
 export function LibraryEntryControls({ entry }: LibraryEntryControlsProps) {

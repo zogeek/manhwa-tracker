@@ -56,7 +56,7 @@ export default async function LibraryPage() {
             </h2>
             <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
               {entries.map((entry) => (
-                <ManhwaCard key={entry.id} manhwa={entry.manhwa}>
+                <ManhwaCard key={entry.id} manhwa={entry.manhwa} href={`/manhwas/${entry.manhwaId}`}>
                   <LibraryEntryControls entry={entry} />
                 </ManhwaCard>
               ))}
