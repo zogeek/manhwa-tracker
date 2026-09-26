@@ -49,3 +49,18 @@ describe('GET /images/proxy', () => {
     expect((await proxy('https://s4.anilist.co/missing.jpg')).status).toBe(404);
   });
 });
+
+describe('GET /images/media/:key', () => {
+  it('rejects anything but a content-addressed key (no path traversal)', async () => {
+    const res = await context.app.request('/images/media/..%2F..%2Fetc%2Fpasswd');
+
+    expect(res.status).toBe(400);
+    expect(errorSchema.parse(await res.json()).error.code).toBe('VALIDATION_FAILED');
+  });
+
+  it('answers 404 for a media that was never mirrored', async () => {
+    const res = await context.client.images.media[':key'].$get({ param: { key: `${'a'.repeat(64)}.png` } });
+
+    expect(res.status).toBe(404);
+  });
+});

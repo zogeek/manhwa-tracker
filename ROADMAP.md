@@ -38,7 +38,8 @@
 | **Scraper Python isolé** | Écosystème anti-bot plus mature ; l'API Hono reste l'unique point d'entrée vers la DB. |
 | **`timestamptz`, `numeric(8,2)`, index uniques partiels** | Dates sans ambiguïté de fuseau, chapitres 10.5, soft delete compatible avec l'unicité. |
 | **Recherche floue `pg_trgm`** | Index GIN trigrammes sur `manhwas.title`, `original_title` et `manhwa_titles.title` ; seuil `word_similarity` 0.4 posé par transaction (`set_config(…, true)`), jokers `LIKE` échappés. |
-| **Catalogues externes = port + adaptateurs + décorateurs** | `ExternalCatalogProvider` (port) ← `AniListClient` (adaptateur, réponses validées par Zod) enrobé par `RateLimitedCatalogProvider` (30 req/min) et `CachedCatalogProvider` (10 min) dans la composition root. Ajouter MangaDex = un nouvel adaptateur. |
+| **Catalogues externes = pattern Strategy (port + adaptateurs + décorateurs)** | `ExternalCatalogProvider` (port) ← `AniListClient`, `MangaDexClient` (adaptateurs, réponses validées par Zod) enrobés par `RateLimitedCatalogProvider` et `CachedCatalogProvider` dans la composition root ; activés par `DISCOVERY_PROVIDERS`. Port séparé `ExternalChapterFeed` pour les fournisseurs qui listent les chapitres (MangaDex). Références croisées (MangaDex → id AniList) : une même œuvre importée des deux côtés n'a qu'une fiche. |
+| **Outbox transactionnelle + worker Postgres** | Table `jobs` alimentée dans la transaction métier (import → `cover.mirror`, `chapters.sync`) ; worker interne (`JobWorker`) qui réserve par `FOR UPDATE SKIP LOCKED`, ré-essais exponentiels, dead-letter (`failed`), reprise des réservations orphelines, dédoublonnage par `dedupe_key` (index unique partiel), arrêt propre. Un handler par type de tâche (`JobHandler`). |
 | **`fetch` injecté** | Tous les appels sortants passent par un `HttpFetch` injecté : les tests utilisent un faux, jamais le réseau. |
 | **Proxy d'images anti-SSRF** | Liste blanche de domaines (revérifiée à chaque redirection), HTTPS/port 443, pas de SVG, 5 Mo max, 8 s max, `CSP: sandbox`. |
 
@@ -110,8 +111,8 @@ Premier admin : `pnpm --filter api admin:promote <email>`.
 |---|---|---|
 | **Auth** `/api/auth/*` | — | Géré par Better Auth (sign-up, sign-in, session, sign-out…), rate-limité |
 | **Sources** `/sources` | `GET /`, `GET /:id` | 👑 `POST /`, `PATCH /:id`, `DELETE /:id` (soft) |
-| **Manhwas** `/manhwas` | `GET /`, `GET /:id`, `GET /search?q=&limit=&external=` (floue `pg_trgm` sur titres + alias ; repli AniList si aucun résultat local, dégradé proprement si AniList est indisponible) | 🔒 `POST /import` `{ provider, externalId }` (idempotent : 201 puis 200, 409 si retiré par un admin) · 👑 `POST /`, `PATCH /:id`, `DELETE /:id` (soft) |
-| **Images** `/images` | `GET /proxy?url=` (couvertures tierces servies par l'API : anti-hotlinking, cache 24 h, liste blanche `IMAGE_PROXY_ALLOWED_HOSTS`) | — |
+| **Manhwas** `/manhwas` | `GET /`, `GET /:id`, `GET /search?q=&limit=&external=&providers=` (floue `pg_trgm` sur titres + alias ; repli AniList + MangaDex si aucun résultat local, chaque fournisseur dégradé indépendamment) | 🔒 `POST /import` `{ provider, externalId }` (idempotent : 201 puis 200, 409 si retiré par un admin) · 👑 `POST /`, `PATCH /:id`, `DELETE /:id` (soft) |
+| **Images** `/images` | `GET /proxy?url=` (couvertures tierces servies par l'API : anti-hotlinking, cache 24 h, liste blanche `IMAGE_PROXY_ALLOWED_HOSTS`) · `GET /media/:key` (couvertures copiées localement, clé SHA-256, cache `immutable`) | — |
 | **Chapters** `/chapters` | `GET /`, `GET /manhwa/:manhwaId`, `GET /:id` | 👑 `POST /`, `PATCH /:id`, `DELETE /:id` (soft) |
 | **Taxonomie** `/taxonomy` | `GET /vocabularies`, `GET /vocabularies/:slug/terms`, `GET /manhwas/:manhwaId/terms` | 👑 `POST /vocabularies`, `POST /terms`, `PATCH /terms/:id` (anti-cycle), `DELETE /terms/:id` (409 si enfants), `PUT`/`DELETE /manhwas/:manhwaId/terms/:termId` |
 | **Ingestion** `/api/ingest` (M2M) | — | 🤖 clé `x-api-key` : `POST /runs`, `PATCH /runs/:id`, `POST /health`, `POST /batches` (idempotent, `Idempotency-Key`) — hors `AppType` |
@@ -201,6 +202,7 @@ Worker Python isolé (FastAPI/Playwright) qui poussera ses données vers l'API H
 - API d'ingestion M2M (`/api/ingest`, clé d'API, lots idempotents et atomiques)
 - Frontend : catalogue (grille, ajout à la bibliothèque) et bibliothèque (+1 chapitre, statut)
 - « Super-backend » : recherche floue `pg_trgm`, repli + import AniList (genres/tags créés à la volée, résolution par alias), proxy d'images anti-SSRF, cache TTL et limiteur de débit
+- Multi-fournisseurs (Strategy) : MangaDex en plus d'AniList, filtre `?providers=`, références croisées anti-doublon ; outbox + worker `SKIP LOCKED` (miroir des couvertures sur disque, synchronisation des chapitres MangaDex)
 
 ### 🔴 Priorité suivante — Sécurité & robustesse API
 
@@ -230,6 +232,14 @@ Télémétrie de lecture partitionnée (sessions / événements), rapprochement 
 
 | Fonctionnalité | Ce que ça apporte | Esquisse technique |
 |---|---|---|
-| **Outbox transactionnelle + file de jobs Postgres** | Aucun événement perdu ni envoyé deux fois (« nouveau chapitre », « œuvre importée ») : base fiable pour les notifications, le rafraîchissement périodique des fiches AniList, les ré-essais | Table `outbox_events` écrite dans la même transaction que l'ingestion ; workers qui consomment avec `SELECT … FOR UPDATE SKIP LOCKED` (ou `pg-boss`), ré-essais exponentiels, dead-letter ; SSE / Web Push branchés en aval |
+| **Suite de l'outbox** (socle livré) | Rafraîchissement périodique des fiches et chapitres, événement « nouveau chapitre » pour les notifications | Tâches planifiées (`run_at` + ré-enfilage), enfilage depuis l'ingestion du scraper, page admin des tâches `failed` (relance), purge des tâches terminées |
 | **Recherche sémantique et recommandations (`pgvector`)** | « Un manhwa où le héros se réincarne en forgeron » trouve des œuvres sans mot commun ; « Parce que vous avez lu X » | Embeddings du synopsis + tags stockés en `vector(…)` (index HNSW) ; classement hybride trigrammes + vecteurs (Reciprocal Rank Fusion) ; filtrage collaboratif sur `reading_progress` |
-| **Miroir des couvertures (stockage objet adressé par contenu)** | Plus de dépendance au CDN tiers (liens morts, retraits, blocages) ; images redimensionnées, chargement instantané | Job de l'outbox qui télécharge via le proxy durci, hash SHA-256 → clé S3/R2 (dédoublonnage), variantes `sharp` (WebP/AVIF, 3 tailles), `blurhash` en base pour l'aperçu flou |
+| **Suite du miroir des couvertures** (socle livré : disque local, clé SHA-256) | Images redimensionnées, chargement instantané, stockage partagé entre instances | Adaptateur `MediaStorage` S3/R2, variantes `sharp` (WebP/AVIF, 3 tailles), `blurhash` en base, exposer `storageKey` dans `GET /manhwas` |
+
+### 🧠 Idées d'architecte V2 (non validées)
+
+| Fonctionnalité | Ce que ça apporte | Esquisse technique |
+|---|---|---|
+| **Temps réel : `LISTEN/NOTIFY` → SSE + Web Push** | « Le chapitre 176 de TBATE est sorti » arrive en quelques secondes, sans que le front interroge l'API en boucle ; le worker se réveille instantanément au lieu de sonder toutes les 2 s | Trigger `pg_notify` à l'insertion dans `jobs` / `chapter_releases` ; une connexion `LISTEN` dédiée par instance ; route SSE authentifiée (`requireAuth`) qui ne pousse que les séries de la bibliothèque de l'utilisateur ; Web Push (VAPID) quand l'onglet est fermé ; tâche outbox `notify.new_chapter` pour le fan-out |
+| **Observabilité OpenTelemetry de bout en bout** | Voir sur UNE trace : requête d'import → transaction → tâche enfilée → tâche exécutée 3 s plus tard → appel MangaDex lent ; alertes sur la profondeur de file et les tâches `failed` | SDK OTel Node (auto-instrumentation HTTP/pg/fetch) ; `traceparent` stocké dans le payload du job pour relier producteur et worker ; métriques (latence par fournisseur, jobs par statut, âge de la plus vieille tâche) ; export OTLP → Grafana Tempo/Prometheus/Loki ; SLO + alerting |
+| **Résilience distribuée : Redis (Valkey) pour quotas, cache et disjoncteurs** | Aujourd'hui cache et quotas sont en mémoire PAR instance : à 3 instances, on envoie 3× notre quota à MangaDex. Avec Redis : un quota global, un cache partagé, et un fournisseur en panne est court-circuité au lieu d'être martelé | Seau à jetons atomique (script Lua) partagé ; cache L1 mémoire + L2 Redis avec *stale-while-revalidate* ; *single-flight* (100 recherches identiques simultanées = 1 appel sortant) ; décorateur `CircuitBreakerCatalogProvider` (ouvert après N échecs, demi-ouvert après délai) — branché dans la composition root sans toucher au service |

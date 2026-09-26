@@ -171,6 +171,8 @@ export function toExternalManhwa(media: AniListMedia): ExternalManhwa {
     endDate: toIsoDate(media.endDate),
     genres: [...new Set((media.genres ?? []).map((genre) => genre.trim()).filter(Boolean))],
     tags: relevantTags(media),
+    // AniList n'expose pas les identifiants des autres catalogues : c'est MangaDex qui pointe vers AniList.
+    crossReferences: [],
   };
 }
 

@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import type { DbClient } from '../../shared/db/index.js';
 import {
   externalLinks,
@@ -13,7 +13,13 @@ import {
 import { firstOrNull, firstOrThrow } from '../../shared/db/utils.js';
 import { slugify } from '../../shared/lib/slug.js';
 import type { NewManhwaTerm } from '../taxonomy/taxonomy.schema.js';
-import type { ExternalManhwa, ExternalProvider, ExternalTag } from './external-catalog.js';
+import {
+  externalRefKey,
+  type ExternalManhwa,
+  type ExternalProvider,
+  type ExternalRef,
+  type ExternalTag,
+} from './external-catalog.js';
 
 /** Provenance des tags posés par l'import (≠ `curated` d'un admin, ≠ `scraper`). */
 const EXTERNAL_TERM_SOURCE: NewManhwaTerm['source'] = 'external';
@@ -27,13 +33,22 @@ export type ExternalLinkTarget = {
 export type VocabularyRef = { slug: string; name: string };
 
 export interface DiscoveryRepository {
-  /** Sérialise les imports concurrents d'une même œuvre (verrou libéré au COMMIT/ROLLBACK). */
-  lockExternalRef(provider: ExternalProvider, externalId: string): Promise<void>;
+  /**
+   * Sérialise les imports concurrents touchant l'une de ces références (verrous libérés au COMMIT/ROLLBACK).
+   * Verrouiller aussi les références croisées empêche « AniList #1 » et « MangaDex X → AniList #1 »
+   * importés au même instant de créer deux fiches.
+   */
+  lockExternalRefs(refs: readonly ExternalRef[]): Promise<void>;
   findLinkedManhwa(provider: ExternalProvider, externalId: string): Promise<ExternalLinkTarget | null>;
-  /** externalId → manhwaId, pour les œuvres déjà présentes (et actives) dans le catalogue. */
-  findImportedManhwaIds(provider: ExternalProvider, externalIds: readonly string[]): Promise<Map<string, string>>;
+  /** `provider:externalId` → manhwaId, pour les œuvres déjà présentes (et actives) dans le catalogue. */
+  findImportedManhwaIds(refs: readonly ExternalRef[]): Promise<Map<string, string>>;
   /** Crée la fiche, ses titres alternatifs, sa couverture et son lien externe. Renvoie l'id du manhwa. */
   insertImportedManhwa(item: ExternalManhwa, userId: string): Promise<string>;
+  /**
+   * Rattache des références externes à une fiche. Ignore celles déjà prises (par cette fiche ou,
+   * pour un même fournisseur, par une autre). Renvoie le nombre de liens créés.
+   */
+  linkExternalRefs(manhwaId: string, refs: readonly ExternalRef[]): Promise<number>;
   /**
    * Rattache des termes au manhwa, en les créant à la volée dans le vocabulaire (créé s'il manque).
    * Un nom est d'abord résolu par les alias existants (« Sci-Fi » → terme « science-fiction »).
@@ -45,8 +60,12 @@ export interface DiscoveryRepository {
 export class DrizzleDiscoveryRepository implements DiscoveryRepository {
   constructor(private readonly db: DbClient) {}
 
-  async lockExternalRef(provider: ExternalProvider, externalId: string): Promise<void> {
-    await this.db.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${`import:${provider}:${externalId}`}, 0))`);
+  async lockExternalRefs(refs: readonly ExternalRef[]): Promise<void> {
+    // Ordre global stable : deux transactions qui verrouillent {A, B} et {B, A} ne s'interbloquent pas.
+    const keys = [...new Set(refs.map(externalRefKey))].sort();
+    for (const key of keys) {
+      await this.db.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${`import:${key}`}, 0))`);
+    }
   }
 
   async findLinkedManhwa(provider: ExternalProvider, externalId: string): Promise<ExternalLinkTarget | null> {
@@ -60,14 +79,25 @@ export class DrizzleDiscoveryRepository implements DiscoveryRepository {
     return row ? { manhwaId: row.manhwaId, deleted: row.deletedAt !== null } : null;
   }
 
-  async findImportedManhwaIds(provider: ExternalProvider, externalIds: readonly string[]): Promise<Map<string, string>> {
-    if (externalIds.length === 0) return new Map();
+  async findImportedManhwaIds(refs: readonly ExternalRef[]): Promise<Map<string, string>> {
+    const idsByProvider = new Map<ExternalProvider, Set<string>>();
+    for (const { provider, externalId } of refs) {
+      idsByProvider.set(provider, (idsByProvider.get(provider) ?? new Set()).add(externalId));
+    }
+    if (idsByProvider.size === 0) return new Map();
+
     const rows = await this.db
-      .select({ externalId: externalLinks.externalId, manhwaId: externalLinks.manhwaId })
+      .select({ provider: externalLinks.provider, externalId: externalLinks.externalId, manhwaId: externalLinks.manhwaId })
       .from(externalLinks)
       .innerJoin(manhwas, and(eq(manhwas.id, externalLinks.manhwaId), isNull(manhwas.deletedAt)))
-      .where(and(eq(externalLinks.provider, provider), inArray(externalLinks.externalId, [...externalIds])));
-    return new Map(rows.map((row) => [row.externalId, row.manhwaId]));
+      .where(
+        or(
+          ...[...idsByProvider].map(([provider, ids]) =>
+            and(eq(externalLinks.provider, provider), inArray(externalLinks.externalId, [...ids])),
+          ),
+        ),
+      );
+    return new Map(rows.map((row) => [`${row.provider}:${row.externalId}`, row.manhwaId]));
   }
 
   async insertImportedManhwa(item: ExternalManhwa, userId: string): Promise<string> {
@@ -110,6 +140,17 @@ export class DrizzleDiscoveryRepository implements DiscoveryRepository {
     }
 
     return manhwaId;
+  }
+
+  async linkExternalRefs(manhwaId: string, refs: readonly ExternalRef[]): Promise<number> {
+    if (refs.length === 0) return 0;
+    const inserted = await this.db
+      .insert(externalLinks)
+      .values(refs.map(({ provider, externalId, url }) => ({ manhwaId, provider, externalId, externalUrl: url })))
+      // Deux contraintes possibles (fiche+fournisseur, fournisseur+id) : on les ignore toutes les deux.
+      .onConflictDoNothing()
+      .returning({ id: externalLinks.id });
+    return inserted.length;
   }
 
   async attachTerms(manhwaId: string, vocabulary: VocabularyRef, tags: readonly ExternalTag[]): Promise<number> {

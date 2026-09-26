@@ -1,10 +1,15 @@
 import { and, eq } from 'drizzle-orm';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import {
+  chapterReleases,
+  chapters,
   externalLinks,
+  jobs,
   manhwaCovers,
+  manhwaSources,
   manhwaTerms,
   manhwaTitles,
+  sources,
   termAliases,
   terms,
   vocabularies,
@@ -14,21 +19,55 @@ import { seedCatalog, type SeededCatalog } from '../../shared/db/seed.test.js';
 import { createFakeFetch } from '../../test/fake-fetch.js';
 import { createTestContext, signUp, signUpAdmin, type TestUser } from '../../test/integration.js';
 import { aniListDetailsResponse, aniListMedia, aniListSearchResponse, readGraphQLRequest } from './anilist.fixture.test.js';
+import {
+  mangaDexChapter,
+  mangaDexEntityResponse,
+  mangaDexFeedResponse,
+  mangaDexManga,
+  mangaDexSearchResponse,
+  TBATE_MANGADEX_ID,
+} from './mangadex.fixture.test.js';
 
 const TBATE_ID = '105398';
+const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
-// Faux AniList : connaît une seule œuvre, « The Beginning After the End ».
-const anilist = createFakeFetch(({ url, init }) => {
-  if (url.hostname !== 'graphql.anilist.test') return new Response(null, { status: 404 });
-  const { query, variables } = readGraphQLRequest(init);
-  if (query.includes('Page(')) {
-    const search = String(variables['search']).toLowerCase();
-    return aniListSearchResponse(search.includes('beginning') ? [aniListMedia()] : []);
+// Faux Internet : AniList et MangaDex connaissent une seule œuvre, « The Beginning After the End »
+// (MangaDex pointe vers son id AniList), et leurs CDN servent une couverture PNG.
+let mangadexFeedDown = false;
+// Constant d'un appel à l'autre, comme le vrai flux : mêmes parutions, mêmes ids.
+const TBATE_FEED = [
+  mangaDexChapter({ chapter: '1', translatedLanguage: 'en' }),
+  mangaDexChapter({ chapter: '1', translatedLanguage: 'fr', group: 'Scan FR' }),
+  mangaDexChapter({ chapter: '2' }),
+  mangaDexChapter({ chapter: null }), // one-shot : ignoré
+];
+const upstream = createFakeFetch(({ url, init }) => {
+  if (url.hostname === 'graphql.anilist.test') {
+    const { query, variables } = readGraphQLRequest(init);
+    if (query.includes('Page(')) {
+      const search = String(variables['search']).toLowerCase();
+      return aniListSearchResponse(search.includes('beginning') ? [aniListMedia()] : []);
+    }
+    return aniListDetailsResponse(String(variables['id']) === TBATE_ID ? aniListMedia() : null);
   }
-  return aniListDetailsResponse(String(variables['id']) === TBATE_ID ? aniListMedia() : null);
+  if (url.hostname === 'api.mangadex.test') {
+    if (url.pathname === '/manga') {
+      const title = (url.searchParams.get('title') ?? '').toLowerCase();
+      return mangaDexSearchResponse(title.includes('beginning') ? [mangaDexManga()] : []);
+    }
+    if (url.pathname === `/manga/${TBATE_MANGADEX_ID}/feed`) {
+      if (mangadexFeedDown) return new Response(null, { status: 503 });
+      return mangaDexFeedResponse(TBATE_FEED);
+    }
+    return mangaDexEntityResponse(url.pathname === `/manga/${TBATE_MANGADEX_ID}` ? mangaDexManga() : null);
+  }
+  if (url.hostname === 's4.anilist.co' || url.hostname === 'uploads.mangadex.org') {
+    return new Response(PNG, { headers: { 'Content-Type': 'image/png' } });
+  }
+  return new Response(null, { status: 404 });
 });
 
-const context = createTestContext({ fetch: anilist.fetch });
+const context = createTestContext({ fetch: upstream.fetch });
 const { manhwas, taxonomy } = context.client;
 
 let catalog: SeededCatalog;
@@ -39,15 +78,20 @@ beforeEach(async () => {
   catalog = await seedCatalog(context.db);
   reader = await signUp(context, 'reader');
   admin = await signUpAdmin(context, 'admin');
-  anilist.calls.length = 0;
+  upstream.calls.length = 0;
+  mangadexFeedDown = false;
 });
 
 afterAll(() => context.close());
 
-const search = (q: string, external?: 'true') => manhwas.search.$get({ query: { q, ...(external ? { external } : {}) } });
+const search = (q: string, external?: 'true', providers?: string) =>
+  manhwas.search.$get({ query: { q, ...(external ? { external } : {}), ...(providers ? { providers } : {}) } });
 
 const importTbate = (user: TestUser) =>
   manhwas.import.$post({ json: { provider: 'anilist', externalId: TBATE_ID } }, { headers: user.headers });
+
+const importTbateFromMangaDex = (user: TestUser) =>
+  manhwas.import.$post({ json: { provider: 'mangadex', externalId: TBATE_MANGADEX_ID } }, { headers: user.headers });
 
 async function termSlugsOf(manhwaId: string) {
   const rows = await context.db
@@ -68,7 +112,7 @@ describe('GET /manhwas/search — local fuzzy search (pg_trgm)', () => {
     expect(data.local.map((hit) => hit.title)).toEqual(['Solo Leveling']);
     expect(data.local[0]?.score).toBeGreaterThan(0.4);
     expect(data.providers).toEqual([]);
-    expect(anilist.calls).toHaveLength(0);
+    expect(upstream.calls).toHaveLength(0);
   });
 
   it('matches alternative titles and aliases', async () => {
@@ -95,28 +139,64 @@ describe('GET /manhwas/search — local fuzzy search (pg_trgm)', () => {
   it('validates the query', async () => {
     const tooShort = await search('a');
     expect(tooShort.status).toBe(400);
-    expect(anilist.calls).toHaveLength(0);
+    expect(upstream.calls).toHaveLength(0);
   });
 });
 
-describe('GET /manhwas/search — external fallback (AniList)', () => {
-  it('proposes AniList results when nothing matches locally', async () => {
+describe('GET /manhwas/search — external fallback (AniList + MangaDex)', () => {
+  it('proposes results from every enabled provider when nothing matches locally', async () => {
     const { data } = await (await search('Beginning After')).json();
 
     expect(data.local).toEqual([]);
-    expect(data.providers).toEqual([{ provider: 'anilist', status: 'ok' }]);
+    expect(data.providers).toEqual([
+      { provider: 'anilist', status: 'ok' },
+      { provider: 'mangadex', status: 'ok' },
+    ]);
     expect(data.external).toMatchObject([
       { provider: 'anilist', externalId: TBATE_ID, title: 'The Beginning After the End', importedManhwaId: null },
+      {
+        provider: 'mangadex',
+        externalId: TBATE_MANGADEX_ID,
+        crossReferences: [{ provider: 'anilist', externalId: TBATE_ID }],
+        importedManhwaId: null,
+      },
     ]);
   });
 
-  it('reports the provider as unavailable instead of failing', async () => {
+  it('queries only the providers requested by the client', async () => {
+    const { data } = await (await search('Beginning After', undefined, 'mangadex')).json();
+
+    expect(data.providers).toEqual([{ provider: 'mangadex', status: 'ok' }]);
+    // (MangaDex a pu répondre depuis le cache de recherche : on vérifie seulement qu'AniList n'est pas sollicité.)
+    expect(upstream.calls.filter((call) => call.url.hostname === 'graphql.anilist.test')).toEqual([]);
+
+    const invalid = await search('Beginning After', undefined, 'anilist,kitsu');
+    expect(invalid.status).toBe(400);
+  });
+
+  it('ignores providers disabled on the server', async () => {
+    const anilistOnly = createTestContext({ fetch: upstream.fetch, discoveryProviders: ['anilist'] });
+    const res = await anilistOnly.client.manhwas.search.$get({ query: { q: 'Beginning After', providers: 'mangadex' } });
+    const importRes = await anilistOnly.client.manhwas.import.$post(
+      { json: { provider: 'mangadex', externalId: TBATE_MANGADEX_ID } },
+      { headers: reader.headers },
+    );
+    await anilistOnly.close();
+
+    expect((await res.json()).data.providers).toEqual([]);
+    expect(importRes.status).toBe(400);
+  });
+
+  it('reports each provider as unavailable instead of failing', async () => {
     const offline = createTestContext();
     const res = await offline.client.manhwas.search.$get({ query: { q: 'nothing like this' } });
     await offline.close();
 
     expect(res.status).toBe(200);
-    expect((await res.json()).data.providers).toEqual([{ provider: 'anilist', status: 'unavailable' }]);
+    expect((await res.json()).data.providers).toEqual([
+      { provider: 'anilist', status: 'unavailable' },
+      { provider: 'mangadex', status: 'unavailable' },
+    ]);
   });
 });
 
@@ -128,7 +208,7 @@ describe('POST /manhwas/import', () => {
     );
 
     expect(res.status).toBe(401);
-    expect(anilist.calls).toHaveLength(0);
+    expect(upstream.calls).toHaveLength(0);
   });
 
   it('imports the work with its titles, cover, external link and taxonomy', async () => {
@@ -193,16 +273,17 @@ describe('POST /manhwas/import', () => {
 
     expect(secondRes.status).toBe(200);
     expect((await secondRes.json()).data.id).toBe(first.data.id);
-    expect(anilist.calls).toHaveLength(1);
+    expect(upstream.calls).toHaveLength(1);
 
     // Désormais trouvée localement : plus d'appel externe.
     const { data } = await (await search('Beginning After the End')).json();
     expect(data.local.map((hit) => hit.id)).toEqual([first.data.id]);
     expect(data.providers).toEqual([]);
 
-    // Recherche externe forcée : le résultat AniList pointe vers la fiche locale.
+    // Recherche externe forcée : les deux résultats pointent vers la fiche locale
+    // (MangaDex via sa référence croisée vers AniList).
     const forced = await (await search('Beginning After the End', 'true')).json();
-    expect(forced.data.external[0]?.importedManhwaId).toBe(first.data.id);
+    expect(forced.data.external.map((hit) => hit.importedManhwaId)).toEqual([first.data.id, first.data.id]);
   });
 
   it('serializes concurrent imports of the same work', async () => {
@@ -248,5 +329,98 @@ describe('POST /manhwas/import', () => {
       'genre:fantasy',
       'theme:reincarnation',
     ]);
+  });
+});
+
+describe('POST /manhwas/import — MangaDex and cross-provider deduplication', () => {
+  it('imports a MangaDex work with its AniList cross reference and queues its follow-up jobs (outbox)', async () => {
+    const res = await importTbateFromMangaDex(reader);
+
+    expect(res.status).toBe(201);
+    const { data: manhwa } = await res.json();
+    expect(manhwa).toMatchObject({ title: 'The Beginning After the End', type: 'manhwa', status: 'completed' });
+
+    const links = await context.db.select().from(externalLinks).where(eq(externalLinks.manhwaId, manhwa.id));
+    expect(links.map((link) => `${link.provider}:${link.externalId}`).sort()).toEqual([
+      `anilist:${TBATE_ID}`,
+      `mangadex:${TBATE_MANGADEX_ID}`,
+    ]);
+
+    // Écrites dans la même transaction que la fiche : aucune tâche ne peut manquer à l'appel.
+    const queued = await context.db.select().from(jobs);
+    expect(queued.map((job) => job.type).sort()).toEqual(['chapters.sync', 'cover.mirror']);
+    expect(queued.every((job) => job.status === 'pending')).toBe(true);
+  });
+
+  it('completes the manhwa imported from AniList instead of creating a duplicate', async () => {
+    const { data: fromAniList } = await (await importTbate(reader)).json();
+
+    const res = await importTbateFromMangaDex(admin);
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).data.id).toBe(fromAniList.id);
+    const links = await context.db.select().from(externalLinks).where(eq(externalLinks.manhwaId, fromAniList.id));
+    expect(links).toHaveLength(2);
+    // Et dans l'autre sens : l'import AniList retrouve la fiche créée depuis MangaDex.
+    expect((await importTbate(reader)).status).toBe(200);
+  });
+
+  it('serializes concurrent imports of the same work from two providers', async () => {
+    const responses = await Promise.all([importTbate(reader), importTbateFromMangaDex(admin)]);
+
+    expect(responses.map((res) => res.status).sort()).toEqual([200, 201]);
+    const ids = await Promise.all(responses.map(async (res) => (await res.json()).data.id));
+    expect(new Set(ids).size).toBe(1);
+  });
+});
+
+describe('background jobs after an import (worker)', () => {
+  it('syncs the MangaDex chapters and mirrors the cover, then serves it locally', async () => {
+    const { data: manhwa } = await (await importTbateFromMangaDex(reader)).json();
+
+    expect(await context.worker.runOnce()).toBe(2);
+
+    const finished = await context.db.select().from(jobs);
+    expect(finished.map((job) => job.status)).toEqual(['succeeded', 'succeeded']);
+
+    // Chapitres canoniques 1 et 2, trois parutions (chapitre 1 en anglais et en français).
+    const synced = await context.db.select().from(chapters).where(eq(chapters.manhwaId, manhwa.id));
+    expect(synced.map((chapter) => chapter.number).sort()).toEqual([1, 2]);
+    const releases = await context.db
+      .select({ language: chapterReleases.language, source: sources.name })
+      .from(chapterReleases)
+      .innerJoin(chapters, eq(chapters.id, chapterReleases.chapterId))
+      .innerJoin(sources, eq(sources.id, chapterReleases.sourceId))
+      .where(eq(chapters.manhwaId, manhwa.id));
+    expect(releases.map((release) => `${release.source}:${release.language}`).sort()).toEqual([
+      'MangaDex:en',
+      'MangaDex:en',
+      'MangaDex:fr',
+    ]);
+    const [sourceLink] = await context.db.select().from(manhwaSources).where(eq(manhwaSources.manhwaId, manhwa.id));
+    expect(sourceLink).toMatchObject({ latestChapter: 2, manhwaUrl: `https://mangadex.org/title/${TBATE_MANGADEX_ID}` });
+
+    const cover = firstOrThrow(await context.db.select().from(manhwaCovers).where(eq(manhwaCovers.manhwaId, manhwa.id)));
+    expect(cover.storageKey).toMatch(/^[a-f0-9]{64}\.png$/);
+    const media = await context.client.images.media[':key'].$get({ param: { key: cover.storageKey ?? '' } });
+    expect(media.status).toBe(200);
+    expect(media.headers.get('cache-control')).toContain('immutable');
+    expect(new Uint8Array(await media.arrayBuffer())).toEqual(PNG);
+
+    // Tâches rejouées (livraison « au moins une fois ») : aucun doublon.
+    await context.db.update(jobs).set({ status: 'pending', runAt: new Date(0) });
+    expect(await context.worker.runOnce()).toBe(2);
+    expect(await context.db.select().from(chapterReleases)).toHaveLength(3);
+  });
+
+  it('keeps a failing job in the queue with its error, to be retried later', async () => {
+    mangadexFeedDown = true;
+    await importTbateFromMangaDex(reader);
+
+    await context.worker.runOnce();
+
+    const [sync] = await context.db.select().from(jobs).where(eq(jobs.type, 'chapters.sync'));
+    expect(sync).toMatchObject({ status: 'pending', attempts: 1, lastError: expect.stringContaining('HTTP 503') });
+    expect(sync?.runAt.getTime()).toBeGreaterThan(Date.now());
   });
 });

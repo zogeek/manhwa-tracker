@@ -1,3 +1,5 @@
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { createApp } from './app.js';
@@ -16,7 +18,9 @@ const container = createContainer({
     trustedOrigins: ['http://localhost:3000'],
     rateLimit: false,
   },
-  integrations: { ...TEST_INTEGRATIONS, fetch: offlineFetch },
+  // Stockage paresseux lui aussi : le répertoire n'est créé qu'à la première écriture (jamais ici).
+  integrations: { ...TEST_INTEGRATIONS, fetch: offlineFetch, mediaStorageDir: join(tmpdir(), 'unused-media') },
+  jobs: { workerId: 'unit-tests' },
 });
 const app = createApp({
   services: container.services,
