@@ -111,6 +111,13 @@ export const sourceHealthStatusEnum = pgEnum('source_health_status', [
   'down',
 ]);
 
+export const jobStatusEnum = pgEnum('job_status', [
+  'pending', // en attente (éventuellement différé par `run_at` : ré-essai)
+  'running', // réservé par un worker (`locked_by`, `locked_at`)
+  'succeeded',
+  'failed', // abandonné : erreur définitive ou ré-essais épuisés (dead-letter)
+]);
+
 export const auditActionEnum = pgEnum('audit_action', [
   'create',
   'update',
@@ -418,6 +425,9 @@ export const manhwaCovers = pgTable('manhwa_covers', {
   imageUrl: text('image_url').notNull(),
   source: text('source'), // 'anilist' | 'mal' | 'custom' | 'scraped'
   isPrimary: boolean('is_primary').default(false).notNull(),
+  // Copie locale (job `cover.mirror`) : clé adressée par contenu (`<sha256>.<ext>`), servie par /images/media/:key.
+  storageKey: text('storage_key'),
+  mirroredAt: timestamptz('mirrored_at'),
   createdAt: createdAt(),
 }, (table) => [
   // Une même image n'est enregistrée qu'une fois par manhwa (upsert idempotent de l'ingestion).
@@ -595,6 +605,42 @@ export const ingestionBatches = pgTable('ingestion_batches', {
 }, (table) => [
   uniqueIndex('ingestion_batches_idempotency_key_idx').on(table.idempotencyKey),
   index('ingestion_batches_scrape_run_id_idx').on(table.scrapeRunId),
+]);
+
+// ============================================================
+// JOBS — File de tâches asynchrones (outbox transactionnelle)
+// ============================================================
+// Une tâche est insérée dans la MÊME transaction que l'écriture métier qui la déclenche
+// (ex. import d'une œuvre → miroir de la couverture) : soit les deux existent, soit aucun.
+// Les workers la réservent avec `SELECT … FOR UPDATE SKIP LOCKED` : plusieurs workers
+// (ou plusieurs instances de l'API) se partagent la file sans jamais traiter deux fois la même tâche.
+
+export const jobs = pgTable('jobs', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  type: text('type').notNull(), // 'cover.mirror' | 'chapters.sync' | … (payload validé par son handler)
+  payload: jsonb('payload').$type<Record<string, unknown>>().notNull(),
+  status: jobStatusEnum('status').default('pending').notNull(),
+  attempts: integer('attempts').default(0).notNull(),
+  maxAttempts: integer('max_attempts').default(5).notNull(),
+  runAt: timestamptz('run_at').defaultNow().notNull(), // pas avant cette date (ré-essai différé)
+  lockedAt: timestamptz('locked_at'),
+  lockedBy: text('locked_by'), // identifiant du worker propriétaire de la réservation
+  lastError: text('last_error'),
+  // Évite d'empiler deux fois la même tâche tant qu'elle n'est pas terminée (ex. `chapters.sync:<manhwaId>`).
+  dedupeKey: text('dedupe_key'),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+  finishedAt: timestamptz('finished_at'),
+}, (table) => [
+  // Index de dépilage : uniquement les tâches en attente, triées par échéance.
+  index('jobs_pending_run_at_idx').on(table.runAt).where(sql`${table.status} = 'pending'`),
+  // Récupération des réservations expirées (worker mort en cours de tâche).
+  index('jobs_running_locked_at_idx').on(table.lockedAt).where(sql`${table.status} = 'running'`),
+  uniqueIndex('jobs_dedupe_key_active_idx')
+    .on(table.dedupeKey)
+    .where(sql`${table.dedupeKey} IS NOT NULL AND ${table.status} IN ('pending', 'running')`),
+  check('jobs_attempts_positive', sql`${table.attempts} >= 0`),
+  check('jobs_max_attempts_positive', sql`${table.maxAttempts} >= 1`),
 ]);
 
 // ============================================================

@@ -50,6 +50,13 @@
       "when": 1790416678374,
       "tag": "0006_search_indexes_and_unique_external_links",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1790425103407,
+      "tag": "0007_jobs_outbox_and_cover_mirror",
+      "breakpoints": true
     }
   ]
 }
