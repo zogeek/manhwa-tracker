@@ -1,3 +1,4 @@
+import { hostname } from 'node:os';
 import { serve } from '@hono/node-server';
 import { createApp } from './app.js';
 import { createContainer } from './container.js';
@@ -17,8 +18,17 @@ const container = createContainer({
   },
   integrations: {
     fetch,
+    discoveryProviders: env.DISCOVERY_PROVIDERS,
     anilistUrl: env.ANILIST_API_URL,
+    mangadexUrl: env.MANGADEX_API_URL,
+    mangadexChapterLanguages: env.MANGADEX_CHAPTER_LANGUAGES,
     imageProxyAllowedHosts: env.IMAGE_PROXY_ALLOWED_HOSTS,
+    mediaStorageDir: env.MEDIA_STORAGE_DIR,
+  },
+  jobs: {
+    workerId: `${hostname()}:${process.pid}`,
+    pollIntervalMs: env.JOBS_POLL_INTERVAL_MS,
+    batchSize: env.JOBS_BATCH_SIZE,
   },
 });
 const app = createApp({
@@ -31,15 +41,18 @@ const app = createApp({
 const server = serve({ fetch: app.fetch, port: env.PORT }, (info) => {
   console.log(`API listening on http://localhost:${info.port} (${env.NODE_ENV})`);
 });
+if (env.JOBS_WORKER_ENABLED) container.worker.start();
 
 function shutdown(signal: NodeJS.Signals): void {
   console.log(`${signal} received, shutting down…`);
   server.close(() => {
-    database
-      .close()
+    // Le worker termine ses tâches en cours AVANT la fermeture du pool (sinon : réservations orphelines).
+    container.worker
+      .stop()
+      .then(() => database.close())
       .then(() => process.exit(0))
       .catch((error: unknown) => {
-        console.error('Failed to close the database pool', error);
+        console.error('Failed to shut down cleanly', error);
         process.exit(1);
       });
   });

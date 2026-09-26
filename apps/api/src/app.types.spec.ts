@@ -29,6 +29,18 @@ describe('AppType (Hono RPC contract)', () => {
     expectTypeOf<NonNullable<Progress['data']>['furthestChapter']>().toEqualTypeOf<number>();
   });
 
+  it('exposes the multi-provider search and the mirrored media to the web client', () => {
+    type SearchQuery = InferRequestType<typeof client.manhwas.search.$get>['query'];
+    expectTypeOf<SearchQuery['providers']>().toEqualTypeOf<string | undefined>();
+
+    type Search = InferResponseType<typeof client.manhwas.search.$get, 200>;
+    expectTypeOf<Search['data']['external'][number]['provider']>().toEqualTypeOf<'anilist' | 'mangadex'>();
+    expectTypeOf<Search['data']['external'][number]['importedManhwaId']>().toEqualTypeOf<string | null>();
+
+    type MediaParam = InferRequestType<(typeof client.images.media)[':key']['$get']>['param'];
+    expectTypeOf<MediaParam['key']>().toEqualTypeOf<string>();
+  });
+
   it('keeps machine and auth endpoints out of the web contract', () => {
     // /api/ingest (clé M2M) et /api/auth (Better Auth) ne font pas partie de AppType.
     expectTypeOf(client).not.toHaveProperty('api');

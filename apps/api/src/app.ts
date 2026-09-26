@@ -54,7 +54,7 @@ export function createApp({ services, auth, corsOrigins, scraperApiKey, logReque
     .route('/taxonomy', createTaxonomyRoutes(services.taxonomy, authMiddleware))
     .route('/reading', createReadingProgressRoutes(services.readingProgress, authMiddleware))
     .route('/reading/lists', createReadingListRoutes(services.readingLists, authMiddleware))
-    .route('/images', createImageRoutes(services.images));
+    .route('/images', createImageRoutes(services.images, services.media));
 }
 
 export type AppType = ReturnType<typeof createApp>;

@@ -1,3 +1,4 @@
+import type { IntegrationOptions } from '../container.js';
 import type { HttpFetch } from '../shared/http/outbound.js';
 
 export type FakeRequest = { url: URL; init: RequestInit | undefined };
@@ -23,6 +24,9 @@ export const offlineFetch: HttpFetch = async (input) => {
 };
 
 export const TEST_INTEGRATIONS = {
+  discoveryProviders: ['anilist', 'mangadex'],
   anilistUrl: 'https://graphql.anilist.test',
+  mangadexUrl: 'https://api.mangadex.test',
+  mangadexChapterLanguages: ['fr', 'en'],
   imageProxyAllowedHosts: ['anilist.co', 'mangadex.org'],
-};
+} satisfies Omit<IntegrationOptions, 'fetch' | 'mediaStorageDir'>;
