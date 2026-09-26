@@ -27,6 +27,7 @@ import {
   mangaDexSearchResponse,
   TBATE_MANGADEX_ID,
 } from './mangadex.fixture.test.js';
+import { kitsuEntityResponse, kitsuManga, kitsuSearchResponse, TBATE_KITSU_ID } from './kitsu.fixture.test.js';
 
 const TBATE_ID = '105398';
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -61,7 +62,14 @@ const upstream = createFakeFetch(({ url, init }) => {
     }
     return mangaDexEntityResponse(url.pathname === `/manga/${TBATE_MANGADEX_ID}` ? mangaDexManga() : null);
   }
-  if (url.hostname === 's4.anilist.co' || url.hostname === 'uploads.mangadex.org') {
+  if (url.hostname === 'kitsu.test') {
+    if (url.pathname === '/api/edge/manga') {
+      const text = (url.searchParams.get('filter[text]') ?? '').toLowerCase();
+      return kitsuSearchResponse(text.includes('beginning') ? [kitsuManga()] : []);
+    }
+    return kitsuEntityResponse(url.pathname === `/api/edge/manga/${TBATE_KITSU_ID}` ? kitsuManga() : null);
+  }
+  if (url.hostname === 's4.anilist.co' || url.hostname === 'uploads.mangadex.org' || url.hostname === 'media.kitsu.app') {
     return new Response(PNG, { headers: { 'Content-Type': 'image/png' } });
   }
   return new Response(null, { status: 404 });
@@ -143,7 +151,7 @@ describe('GET /manhwas/search — local fuzzy search (pg_trgm)', () => {
   });
 });
 
-describe('GET /manhwas/search — external fallback (AniList + MangaDex)', () => {
+describe('GET /manhwas/search — external fallback (AniList + MangaDex + Kitsu)', () => {
   it('proposes results from every enabled provider when nothing matches locally', async () => {
     const { data } = await (await search('Beginning After')).json();
 
@@ -151,12 +159,25 @@ describe('GET /manhwas/search — external fallback (AniList + MangaDex)', () =>
     expect(data.providers).toEqual([
       { provider: 'anilist', status: 'ok' },
       { provider: 'mangadex', status: 'ok' },
+      { provider: 'kitsu', status: 'ok' },
+    ]);
+    expect(upstream.calls.map((call) => call.url.hostname).sort()).toEqual([
+      'api.mangadex.test',
+      'graphql.anilist.test',
+      'kitsu.test',
     ]);
     expect(data.external).toMatchObject([
       { provider: 'anilist', externalId: TBATE_ID, title: 'The Beginning After the End', importedManhwaId: null },
       {
         provider: 'mangadex',
         externalId: TBATE_MANGADEX_ID,
+        crossReferences: [{ provider: 'anilist', externalId: TBATE_ID }],
+        importedManhwaId: null,
+      },
+      {
+        provider: 'kitsu',
+        externalId: TBATE_KITSU_ID,
+        type: 'manhwa',
         crossReferences: [{ provider: 'anilist', externalId: TBATE_ID }],
         importedManhwaId: null,
       },
@@ -170,7 +191,7 @@ describe('GET /manhwas/search — external fallback (AniList + MangaDex)', () =>
     // (MangaDex a pu répondre depuis le cache de recherche : on vérifie seulement qu'AniList n'est pas sollicité.)
     expect(upstream.calls.filter((call) => call.url.hostname === 'graphql.anilist.test')).toEqual([]);
 
-    const invalid = await search('Beginning After', undefined, 'anilist,kitsu');
+    const invalid = await search('Beginning After', undefined, 'anilist,mal');
     expect(invalid.status).toBe(400);
   });
 
@@ -196,6 +217,7 @@ describe('GET /manhwas/search — external fallback (AniList + MangaDex)', () =>
     expect((await res.json()).data.providers).toEqual([
       { provider: 'anilist', status: 'unavailable' },
       { provider: 'mangadex', status: 'unavailable' },
+      { provider: 'kitsu', status: 'unavailable' },
     ]);
   });
 });
@@ -280,10 +302,10 @@ describe('POST /manhwas/import', () => {
     expect(data.local.map((hit) => hit.id)).toEqual([first.data.id]);
     expect(data.providers).toEqual([]);
 
-    // Recherche externe forcée : les deux résultats pointent vers la fiche locale
-    // (MangaDex via sa référence croisée vers AniList).
+    // Recherche externe forcée : les trois résultats pointent vers la fiche locale
+    // (MangaDex et Kitsu via leur référence croisée vers AniList).
     const forced = await (await search('Beginning After the End', 'true')).json();
-    expect(forced.data.external.map((hit) => hit.importedManhwaId)).toEqual([first.data.id, first.data.id]);
+    expect(forced.data.external.map((hit) => hit.importedManhwaId)).toEqual([first.data.id, first.data.id, first.data.id]);
   });
 
   it('serializes concurrent imports of the same work', async () => {
@@ -422,5 +444,36 @@ describe('background jobs after an import (worker)', () => {
     const [sync] = await context.db.select().from(jobs).where(eq(jobs.type, 'chapters.sync'));
     expect(sync).toMatchObject({ status: 'pending', attempts: 1, lastError: expect.stringContaining('HTTP 503') });
     expect(sync?.runAt.getTime()).toBeGreaterThan(Date.now());
+  });
+});
+
+describe('POST /manhwas/import — Kitsu (third provider, zero change in the service)', () => {
+  const importTbateFromKitsu = (user: TestUser) =>
+    manhwas.import.$post({ json: { provider: 'kitsu', externalId: TBATE_KITSU_ID } }, { headers: user.headers });
+
+  it('imports a Kitsu work with its taxonomy and queues the cover mirror', async () => {
+    const res = await importTbateFromKitsu(reader);
+
+    expect(res.status).toBe(201);
+    const { data: manhwa } = await res.json();
+    expect(manhwa).toMatchObject({ title: 'The Beginning After the End', type: 'manhwa', rating: 8.4, startDate: '2018-07-17' });
+    expect(await termSlugsOf(manhwa.id)).toEqual(['genre:action', 'genre:fantasy', 'theme:magic', 'theme:reincarnation']);
+    // Kitsu n'a pas de flux de chapitres branché : seule la couverture part en tâche de fond.
+    expect((await context.db.select().from(jobs)).map((job) => job.type)).toEqual(['cover.mirror']);
+
+    expect(await context.worker.runOnce()).toBe(1);
+    const cover = firstOrThrow(await context.db.select().from(manhwaCovers).where(eq(manhwaCovers.manhwaId, manhwa.id)));
+    expect(cover).toMatchObject({ source: 'kitsu', storageKey: expect.stringMatching(/\.png$/) });
+  });
+
+  it('attaches to the work already imported from AniList or MangaDex instead of duplicating it', async () => {
+    const { data: fromMangaDex } = await (await importTbateFromMangaDex(reader)).json();
+
+    const res = await importTbateFromKitsu(admin);
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).data.id).toBe(fromMangaDex.id);
+    const links = await context.db.select().from(externalLinks).where(eq(externalLinks.manhwaId, fromMangaDex.id));
+    expect(links.map((link) => link.provider).sort()).toEqual(['anilist', 'kitsu', 'mangadex']);
   });
 });

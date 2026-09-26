@@ -34,7 +34,7 @@ describe('AppType (Hono RPC contract)', () => {
     expectTypeOf<SearchQuery['providers']>().toEqualTypeOf<string | undefined>();
 
     type Search = InferResponseType<typeof client.manhwas.search.$get, 200>;
-    expectTypeOf<Search['data']['external'][number]['provider']>().toEqualTypeOf<'anilist' | 'mangadex'>();
+    expectTypeOf<Search['data']['external'][number]['provider']>().toEqualTypeOf<'anilist' | 'mangadex' | 'kitsu'>();
     expectTypeOf<Search['data']['external'][number]['importedManhwaId']>().toEqualTypeOf<string | null>();
 
     type MediaParam = InferRequestType<(typeof client.images.media)[':key']['$get']>['param'];

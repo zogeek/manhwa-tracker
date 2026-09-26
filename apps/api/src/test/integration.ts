@@ -51,7 +51,7 @@ export function createTestContext({
       discoveryProviders,
       fetch,
       mediaStorageDir,
-      rateLimits: { anilist: unlimited, mangadex: unlimited },
+      rateLimits: { anilist: unlimited, mangadex: unlimited, kitsu: unlimited },
     },
     jobs: { workerId: 'integration-tests', batchSize: 50, logger: silentLogger },
   });
