@@ -11,6 +11,7 @@ import { DrizzleDiscoveryRepository } from './modules/discovery/discovery.reposi
 import { DiscoveryService } from './modules/discovery/discovery.service.js';
 import type { ExternalManhwa } from './modules/discovery/external-catalog.js';
 import { CachedCatalogProvider, RateLimitedCatalogProvider } from './modules/discovery/external-catalog.decorators.js';
+import { ImageProxyService } from './modules/images/image-proxy.service.js';
 import { DrizzleIngestionRepository } from './modules/ingestion/ingestion.repository.js';
 import { IngestionService } from './modules/ingestion/ingestion.service.js';
 import { DrizzleManhwaRepository } from './modules/manhwas/manhwa.repository.js';
@@ -28,6 +29,7 @@ export type IntegrationOptions = {
   /** Client HTTP sortant (le `fetch` global en prod, un faux dans les tests : jamais de réseau réel). */
   fetch: HttpFetch;
   anilistUrl: string;
+  imageProxyAllowedHosts: readonly string[];
 };
 
 export type ContainerOptions = {
@@ -73,6 +75,7 @@ export function createContainer({ db, auth, integrations }: ContainerOptions) {
         [anilist],
         discoveryTransactions,
       ),
+      images: new ImageProxyService({ fetch: integrations.fetch, allowedHosts: integrations.imageProxyAllowedHosts }),
       chapters: new ChapterService(new DrizzleChapterRepository(db)),
       taxonomy: new TaxonomyService(new DrizzleTaxonomyRepository(db)),
       readingProgress: new ReadingProgressService(new DrizzleReadingProgressRepository(db), logReadTransactions),

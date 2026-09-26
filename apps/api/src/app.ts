@@ -5,6 +5,7 @@ import { requestId } from 'hono/request-id';
 import { secureHeaders } from 'hono/secure-headers';
 import type { Services } from './container.js';
 import { createChapterRoutes } from './modules/chapters/chapter.route.js';
+import { createImageRoutes } from './modules/images/image.route.js';
 import { createIngestionRoutes } from './modules/ingestion/ingestion.route.js';
 import { createManhwaRoutes } from './modules/manhwas/manhwa.route.js';
 import { createReadingListRoutes } from './modules/reading-lists/reading-list.route.js';
@@ -52,7 +53,8 @@ export function createApp({ services, auth, corsOrigins, scraperApiKey, logReque
     .route('/chapters', createChapterRoutes(services.chapters, authMiddleware))
     .route('/taxonomy', createTaxonomyRoutes(services.taxonomy, authMiddleware))
     .route('/reading', createReadingProgressRoutes(services.readingProgress, authMiddleware))
-    .route('/reading/lists', createReadingListRoutes(services.readingLists, authMiddleware));
+    .route('/reading/lists', createReadingListRoutes(services.readingLists, authMiddleware))
+    .route('/images', createImageRoutes(services.images));
 }
 
 export type AppType = ReturnType<typeof createApp>;

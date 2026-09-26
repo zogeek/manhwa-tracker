@@ -25,6 +25,8 @@ const envSchema = z.object({
   CORS_ORIGINS: commaSeparated('http://localhost:3000'),
   /** Endpoint GraphQL d'AniList (catalogue externe de la recherche et de l'import). */
   ANILIST_API_URL: z.url({ protocol: /^https$/ }).default('https://graphql.anilist.co'),
+  /** Domaines d'images autorisés par `/images/proxy` (sous-domaines inclus). */
+  IMAGE_PROXY_ALLOWED_HOSTS: commaSeparated('anilist.co,mangadex.org'),
 });
 
 export type Env = z.infer<typeof envSchema>;
