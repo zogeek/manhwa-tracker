@@ -25,11 +25,13 @@ const envSchema = z.object({
   SCRAPER_API_KEY: z.string().min(32, 'SCRAPER_API_KEY must be at least 32 characters'),
   CORS_ORIGINS: commaSeparated('http://localhost:3000'),
   /** Catalogues externes activés pour la recherche et l'import, par ordre de priorité. */
-  DISCOVERY_PROVIDERS: commaSeparated('anilist,mangadex').pipe(z.array(z.enum(EXTERNAL_PROVIDERS))),
+  DISCOVERY_PROVIDERS: commaSeparated('anilist,mangadex,kitsu').pipe(z.array(z.enum(EXTERNAL_PROVIDERS))),
   /** Endpoint GraphQL d'AniList (catalogue externe de la recherche et de l'import). */
   ANILIST_API_URL: z.url({ protocol: /^https$/ }).default('https://graphql.anilist.co'),
   /** API REST de MangaDex (catalogue + flux de chapitres). */
   MANGADEX_API_URL: z.url({ protocol: /^https$/ }).default('https://api.mangadex.org'),
+  /** API JSON:API de Kitsu (catalogue). */
+  KITSU_API_URL: z.url({ protocol: /^https$/ }).default('https://kitsu.app/api/edge'),
   /** Langues des chapitres synchronisés depuis MangaDex (codes MangaDex). */
   MANGADEX_CHAPTER_LANGUAGES: commaSeparated('fr,en').pipe(
     z.array(z.string().regex(/^[a-z]{2}(-[a-z]{2})?$/, 'Code de langue MangaDex attendu (ex. fr, pt-br)')).min(1),
@@ -41,7 +43,7 @@ const envSchema = z.object({
   JOBS_POLL_INTERVAL_MS: z.coerce.number().int().min(100).max(60_000).default(2_000),
   JOBS_BATCH_SIZE: z.coerce.number().int().min(1).max(50).default(5),
   /** Domaines d'images autorisés par `/images/proxy` (sous-domaines inclus). */
-  IMAGE_PROXY_ALLOWED_HOSTS: commaSeparated('anilist.co,mangadex.org'),
+  IMAGE_PROXY_ALLOWED_HOSTS: commaSeparated('anilist.co,mangadex.org,kitsu.app,kitsu.io'),
 });
 
 export type Env = z.infer<typeof envSchema>;

@@ -1,7 +1,7 @@
 import type { Manhwa } from '../manhwas/manhwa.schema.js';
 
 /** Fournisseurs de catalogue externes branchés (valeur stockée dans `external_links.provider`). */
-export const EXTERNAL_PROVIDERS = ['anilist', 'mangadex'] as const;
+export const EXTERNAL_PROVIDERS = ['anilist', 'mangadex', 'kitsu'] as const;
 export type ExternalProvider = (typeof EXTERNAL_PROVIDERS)[number];
 
 /** Référence d'une œuvre chez un fournisseur (clé d'unicité de `external_links`). */

@@ -22,6 +22,7 @@ import {
   RateLimitedCatalogProvider,
   RateLimitedChapterFeed,
 } from './modules/discovery/external-catalog.decorators.js';
+import { KitsuClient } from './modules/discovery/kitsu.client.js';
 import { MangaDexClient } from './modules/discovery/mangadex.client.js';
 import { CoverMirrorJob, DrizzleCoverMirrorRepository } from './modules/images/cover-mirror.job.js';
 import { ImageProxyService } from './modules/images/image-proxy.service.js';
@@ -49,6 +50,7 @@ export type IntegrationOptions = {
   anilistUrl: string;
   mangadexUrl: string;
   mangadexChapterLanguages: readonly string[];
+  kitsuUrl: string;
   imageProxyAllowedHosts: readonly string[];
   mediaStorageDir: string;
   /** Quotas sortants par fournisseur (défaut : `DEFAULT_RATE_LIMITS`). */
@@ -57,10 +59,11 @@ export type IntegrationOptions = {
 
 export type RateLimit = Omit<TokenBucketOptions, 'clock'>;
 
-/** Nos quotas sortants, volontairement sous ceux des fournisseurs (AniList ~90 req/min, MangaDex ~5 req/s). */
+/** Nos quotas sortants, volontairement sous ceux des fournisseurs (AniList ~90 req/min, MangaDex ~5 req/s, Kitsu sans quota publié). */
 export const DEFAULT_RATE_LIMITS: Record<ExternalProvider, RateLimit> = {
   anilist: { capacity: 10, refillPerMinute: 30 },
   mangadex: { capacity: 5, refillPerMinute: 120 },
+  kitsu: { capacity: 10, refillPerMinute: 60 },
 };
 
 export type JobOptions = {
@@ -118,6 +121,12 @@ export function createContainer({ db, auth, integrations, jobs }: ContainerOptio
       new RateLimitedCatalogProvider(new AniListClient({ fetch: integrations.fetch, url: integrations.anilistUrl }), anilistBucket),
     ),
     mangadex: withSearchCache(new RateLimitedCatalogProvider(mangadex, mangadexBucket)),
+    kitsu: withSearchCache(
+      new RateLimitedCatalogProvider(
+        new KitsuClient({ fetch: integrations.fetch, url: integrations.kitsuUrl }),
+        new TokenBucket(rateLimits.kitsu),
+      ),
+    ),
   };
   const chapterFeeds: ExternalChapterFeed[] = [new RateLimitedChapterFeed(mangadex, mangadexBucket)].filter((feed) =>
     integrations.discoveryProviders.includes(feed.name),

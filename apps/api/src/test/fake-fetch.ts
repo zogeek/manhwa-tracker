@@ -24,9 +24,10 @@ export const offlineFetch: HttpFetch = async (input) => {
 };
 
 export const TEST_INTEGRATIONS = {
-  discoveryProviders: ['anilist', 'mangadex'],
+  discoveryProviders: ['anilist', 'mangadex', 'kitsu'],
   anilistUrl: 'https://graphql.anilist.test',
   mangadexUrl: 'https://api.mangadex.test',
   mangadexChapterLanguages: ['fr', 'en'],
-  imageProxyAllowedHosts: ['anilist.co', 'mangadex.org'],
+  kitsuUrl: 'https://kitsu.test/api/edge',
+  imageProxyAllowedHosts: ['anilist.co', 'mangadex.org', 'kitsu.app'],
 } satisfies Omit<IntegrationOptions, 'fetch' | 'mediaStorageDir'>;

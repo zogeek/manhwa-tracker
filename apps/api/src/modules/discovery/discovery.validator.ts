@@ -10,7 +10,7 @@ export const catalogSearchQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(25).default(10),
   /** `true` : interroge aussi les catalogues externes même si la recherche locale a trouvé des résultats. */
   external: z.stringbool().default(false),
-  /** Sous-ensemble des fournisseurs à interroger (`anilist,mangadex`) ; défaut : tous ceux activés côté serveur. */
+  /** Sous-ensemble des fournisseurs à interroger (`anilist,mangadex,kitsu`) ; défaut : tous ceux activés côté serveur. */
   providers: z
     .string()
     .max(100)
