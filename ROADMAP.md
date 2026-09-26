@@ -37,6 +37,10 @@
 | **Better Auth derrière le proxy Next.js** | `/api/auth/*` même origine que le front → cookies de session first-party. |
 | **Scraper Python isolé** | Écosystème anti-bot plus mature ; l'API Hono reste l'unique point d'entrée vers la DB. |
 | **`timestamptz`, `numeric(8,2)`, index uniques partiels** | Dates sans ambiguïté de fuseau, chapitres 10.5, soft delete compatible avec l'unicité. |
+| **Recherche floue `pg_trgm`** | Index GIN trigrammes sur `manhwas.title`, `original_title` et `manhwa_titles.title` ; seuil `word_similarity` 0.4 posé par transaction (`set_config(…, true)`), jokers `LIKE` échappés. |
+| **Catalogues externes = port + adaptateurs + décorateurs** | `ExternalCatalogProvider` (port) ← `AniListClient` (adaptateur, réponses validées par Zod) enrobé par `RateLimitedCatalogProvider` (30 req/min) et `CachedCatalogProvider` (10 min) dans la composition root. Ajouter MangaDex = un nouvel adaptateur. |
+| **`fetch` injecté** | Tous les appels sortants passent par un `HttpFetch` injecté : les tests utilisent un faux, jamais le réseau. |
+| **Proxy d'images anti-SSRF** | Liste blanche de domaines (revérifiée à chaque redirection), HTTPS/port 443, pas de SVG, 5 Mo max, 8 s max, `CSP: sandbox`. |
 
 ---
 
@@ -106,7 +110,8 @@ Premier admin : `pnpm --filter api admin:promote <email>`.
 |---|---|---|
 | **Auth** `/api/auth/*` | — | Géré par Better Auth (sign-up, sign-in, session, sign-out…), rate-limité |
 | **Sources** `/sources` | `GET /`, `GET /:id` | 👑 `POST /`, `PATCH /:id`, `DELETE /:id` (soft) |
-| **Manhwas** `/manhwas` | `GET /`, `GET /:id` | 👑 `POST /`, `PATCH /:id`, `DELETE /:id` (soft) |
+| **Manhwas** `/manhwas` | `GET /`, `GET /:id`, `GET /search?q=&limit=&external=` (floue `pg_trgm` sur titres + alias ; repli AniList si aucun résultat local, dégradé proprement si AniList est indisponible) | 🔒 `POST /import` `{ provider, externalId }` (idempotent : 201 puis 200, 409 si retiré par un admin) · 👑 `POST /`, `PATCH /:id`, `DELETE /:id` (soft) |
+| **Images** `/images` | `GET /proxy?url=` (couvertures tierces servies par l'API : anti-hotlinking, cache 24 h, liste blanche `IMAGE_PROXY_ALLOWED_HOSTS`) | — |
 | **Chapters** `/chapters` | `GET /`, `GET /manhwa/:manhwaId`, `GET /:id` | 👑 `POST /`, `PATCH /:id`, `DELETE /:id` (soft) |
 | **Taxonomie** `/taxonomy` | `GET /vocabularies`, `GET /vocabularies/:slug/terms`, `GET /manhwas/:manhwaId/terms` | 👑 `POST /vocabularies`, `POST /terms`, `PATCH /terms/:id` (anti-cycle), `DELETE /terms/:id` (409 si enfants), `PUT`/`DELETE /manhwas/:manhwaId/terms/:termId` |
 | **Ingestion** `/api/ingest` (M2M) | — | 🤖 clé `x-api-key` : `POST /runs`, `PATCH /runs/:id`, `POST /health`, `POST /batches` (idempotent, `Idempotency-Key`) — hors `AppType` |
@@ -138,9 +143,9 @@ Les tables personnelles (`reading_progress`, `chapter_reads`, `reading_lists`) o
 
 | Métrique | Valeur |
 |---|---|
-| Fichiers TypeScript API (hors tests) | 54 |
+| Fichiers TypeScript API (hors tests) | 68 |
 | `any` / type casts | 0 |
-| Tests | 73 (unitaires + intégration sur Postgres éphémère) |
+| Tests | 125 (unitaires + intégration sur Postgres éphémère, appels sortants simulés) |
 | Commandes | `pnpm --filter api typecheck` · `test` · `test:unit` · `test:integration` · `build` |
 
 ---
@@ -194,6 +199,8 @@ Worker Python isolé (FastAPI/Playwright) qui poussera ses données vers l'API H
 - Frontend reconnecté : proxy Next.js, login/inscription, dashboard sur le RPC typé (0 erreur TS)
 - Schéma avancé : chapitres canoniques / parutions, équipes, taxonomie hiérarchique, télémétrie scraper
 - API d'ingestion M2M (`/api/ingest`, clé d'API, lots idempotents et atomiques)
+- Frontend : catalogue (grille, ajout à la bibliothèque) et bibliothèque (+1 chapitre, statut)
+- « Super-backend » : recherche floue `pg_trgm`, repli + import AniList (genres/tags créés à la volée, résolution par alias), proxy d'images anti-SSRF, cache TTL et limiteur de débit
 
 ### 🔴 Priorité suivante — Sécurité & robustesse API
 
@@ -217,4 +224,12 @@ Architecture du worker, première source, planification, ingestion via l'API.
 
 ### 🔵 Évolutions DB proposées (non validées)
 
-Télémétrie de lecture partitionnée (sessions / événements), rapprochement flou des titres (`pg_trgm`) et file de validation, ingestion des tags via `term_aliases`, audit par triggers, PostgreSQL 18 (`uuidv7()`).
+Télémétrie de lecture partitionnée (sessions / événements), rapprochement flou des titres du scraper (`pg_trgm` est en place : reste la file de validation humaine), ingestion des tags du scraper via `term_aliases` (déjà fait pour l'import AniList), audit par triggers, PostgreSQL 18 (`uuidv7()`).
+
+### 🟣 Idées d'architecte (backend avancé, non validées)
+
+| Fonctionnalité | Ce que ça apporte | Esquisse technique |
+|---|---|---|
+| **Outbox transactionnelle + file de jobs Postgres** | Aucun événement perdu ni envoyé deux fois (« nouveau chapitre », « œuvre importée ») : base fiable pour les notifications, le rafraîchissement périodique des fiches AniList, les ré-essais | Table `outbox_events` écrite dans la même transaction que l'ingestion ; workers qui consomment avec `SELECT … FOR UPDATE SKIP LOCKED` (ou `pg-boss`), ré-essais exponentiels, dead-letter ; SSE / Web Push branchés en aval |
+| **Recherche sémantique et recommandations (`pgvector`)** | « Un manhwa où le héros se réincarne en forgeron » trouve des œuvres sans mot commun ; « Parce que vous avez lu X » | Embeddings du synopsis + tags stockés en `vector(…)` (index HNSW) ; classement hybride trigrammes + vecteurs (Reciprocal Rank Fusion) ; filtrage collaboratif sur `reading_progress` |
+| **Miroir des couvertures (stockage objet adressé par contenu)** | Plus de dépendance au CDN tiers (liens morts, retraits, blocages) ; images redimensionnées, chargement instantané | Job de l'outbox qui télécharge via le proxy durci, hash SHA-256 → clé S3/R2 (dédoublonnage), variantes `sharp` (WebP/AVIF, 3 tailles), `blurhash` en base pour l'aperçu flou |
