@@ -160,14 +160,14 @@ Les tables personnelles (`reading_progress`, `chapter_reads`, `reading_lists`) o
 | Client RPC (`app/lib/api.ts`) | ✅ `hc<AppType>` — appels serveur au nom de l'utilisateur via `getForwardedAuthHeaders()` |
 | Auth | ✅ `/login` (connexion / inscription), menu utilisateur (`useSession`) avec déconnexion |
 | Layout | ✅ Sidebar shadcn repliable (Catalogue, Ma Bibliothèque, Paramètres) + header |
-| Pages | ✅ Accueil (bienvenue + statistiques) ; Catalogue : recherche dans l'URL (`?q=&external=true`, anti-rebond, tolérante aux fautes), résultats locaux + AniList/MangaDex/Kitsu streamés (`<Suspense>` + squelettes), import en un clic (toast, `router.refresh()`), fournisseurs en panne signalés sans casser la page ; Fiche `/manhwas/[id]` : couverture via le proxy, synopsis, genres/thèmes (spoilers repliés), progression (+1, statut) et chapitres « Lu » (`POST /reading/reads`), sections streamées ; Ma Bibliothèque (groupée par statut, cartes liées aux fiches) ; 🚧 Paramètres (lecture seule) |
+| Pages | ✅ Accueil (bienvenue + statistiques) ; Catalogue : recherche dans l'URL (`?q=&external=true`, anti-rebond, tolérante aux fautes), résultats locaux + AniList/MangaDex/Kitsu streamés (`<Suspense>` + squelettes), import en un clic (toast, `router.refresh()`), fournisseurs en panne signalés sans casser la page ; Fiche `/manhwas/[id]` : couverture via le proxy, synopsis, genres/thèmes (spoilers repliés), saisie directe du chapitre (« 120 », « 10,5 », validation locale, Échap, « Annuler » dans le toast), statut, chapitres « Lu » (`POST /reading/reads`) et menu « Lu jusqu'ici » / « Reprendre ici » (mise à jour absolue), sections streamées ; Ma Bibliothèque (onglets par statut avec compteurs, filtrage instantané, onglet dans l'URL `?statut=`, statut modifiable depuis la carte, « +1 » optimiste) ; 🚧 Paramètres (lecture seule) |
 | Types front | ✅ Déduits du contrat RPC (`app/lib/api-types.ts`, `InferResponseType`/`InferRequestType`) — aucune interface dupliquée ; libellés FR exhaustifs par enum (`app/lib/labels.ts`) |
 | Données serveur | ✅ `app/lib/queries.ts` (`server-only`) : lectures RPC mémoïsées par `cache()` (la page, `generateMetadata` et les sections streamées partagent un seul appel) |
 | Mutations client | ✅ Hook `useApiMutation` : appel Hono RPC via le proxy, transition React + `router.refresh()`, `onSuccess`/`onError`, toasts Sonner, messages FR par statut (`app/lib/api-errors.ts`) |
 | États de chargement / erreurs | ✅ `loading.tsx` (catalogue, fiche), squelettes par section, `error.tsx` (bouton « Réessayer », `retry()` de Next 16), `not-found.tsx` pour une fiche inconnue |
 | UI (`components/ui`) | ✅ shadcn (style `radix-nova`, alias `utils` → paquet `cn`) : badge, button, card, input, label, field, dropdown-menu, select, sidebar, avatar, separator, sheet, tooltip, skeleton, sonner |
 | TypeScript / Lint | ✅ 0 erreur, 0 avertissement |
-| Tests composants (Vitest + Testing Library, jsdom) | ✅ `pnpm --filter web test` : recherche (anti-rebond, URL), import (succès/409/réseau), « Lu », URL de couverture |
+| Tests composants (Vitest + Testing Library, jsdom) | ✅ `pnpm --filter web test` : recherche (anti-rebond, URL), import (succès/409/réseau), « Lu », saisie du chapitre (validation, annulation, échec serveur, resynchronisation), « Lu jusqu'ici », onglets de la bibliothèque, URL de couverture |
 | Tests E2E (Playwright) | ❌ À mettre en place |
 
 ---
@@ -198,6 +198,7 @@ Worker Python isolé (FastAPI/Playwright) qui poussera ses données vers l'API H
 - Multi-fournisseurs (Strategy) : MangaDex en plus d'AniList, filtre `?providers=`, références croisées anti-doublon ; outbox + worker `SKIP LOCKED` (miroir des couvertures sur disque, synchronisation des chapitres MangaDex)
 - 3ᵉ fournisseur Kitsu (preuve de l'Open/Closed : aucune ligne du service modifiée)
 - Frontend découverte : recherche + import depuis les 3 catalogues, fiche détaillée (tags, chapitres, progression), squelettes / toasts / frontière d'erreur, tests composants Vitest
+- Progression avancée : saisie directe du chapitre, « Lu jusqu'ici » (mise à jour absolue, sans faux historique), « Annuler », bibliothèque en onglets ; l'API passe une série « à lire » en « en cours » dès qu'on saisit un chapitre
 
 ### 🔴 Priorité suivante — Sécurité & robustesse API
 
