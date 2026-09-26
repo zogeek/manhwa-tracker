@@ -13,6 +13,7 @@ const PROXIED_RESOURCES: Record<PublicApiResource, true> = {
   chapters: true,
   taxonomy: true,
   reading: true,
+  images: true,
 };
 
 /**

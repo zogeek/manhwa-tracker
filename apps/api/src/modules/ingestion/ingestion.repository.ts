@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { DbClient } from '../../shared/db/index.js';
 import {
@@ -10,6 +9,7 @@ import {
   sources,
 } from '../../shared/db/schema.js';
 import { firstOrNull, firstOrThrow } from '../../shared/db/utils.js';
+import { slugify } from '../../shared/lib/slug.js';
 import {
   chapterReleases,
   ingestionBatches,
@@ -58,17 +58,6 @@ export interface IngestionRepository {
   findRun(id: string): Promise<ScrapeRun | null>;
   finishRun(id: string, data: FinishRunInput): Promise<ScrapeRun | null>;
   insertHealthSamples(samples: NewSourceHealth[]): Promise<number>;
-}
-
-/** Slug stable d'un nom d'équipe ; repli sur une empreinte pour les noms non latins. */
-export function slugify(name: string): string {
-  const slug = name
-    .toLowerCase()
-    .normalize('NFKD')
-    .replace(/[̀-ͯ]/g, '')
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-  return slug || `group-${createHash('sha256').update(name).digest('hex').slice(0, 12)}`;
 }
 
 export class DrizzleIngestionRepository implements IngestionRepository {
@@ -180,7 +169,7 @@ export class DrizzleIngestionRepository implements IngestionRepository {
   async upsertScanlationGroup(name: string): Promise<string> {
     const rows = await this.db
       .insert(scanlationGroups)
-      .values({ slug: slugify(name), name })
+      .values({ slug: slugify(name, 'group'), name })
       .onConflictDoUpdate({ target: scanlationGroups.slug, set: { updatedAt: new Date() } })
       .returning({ id: scanlationGroups.id });
     return firstOrThrow(rows).id;

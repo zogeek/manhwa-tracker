@@ -1,5 +1,17 @@
 import { z } from 'zod';
 
+/** Liste séparée par des virgules (`a, b,c`) → tableau sans entrées vides. */
+const commaSeparated = (defaultValue: string) =>
+  z
+    .string()
+    .default(defaultValue)
+    .transform((value) =>
+      value
+        .split(',')
+        .map((item) => item.trim())
+        .filter((item) => item.length > 0),
+    );
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().min(1).max(65_535).default(3001),
@@ -10,15 +22,11 @@ const envSchema = z.object({
   BETTER_AUTH_URL: z.url(),
   /** Clé d'API du worker de scraping (header `x-api-key`) : `openssl rand -hex 32`. */
   SCRAPER_API_KEY: z.string().min(32, 'SCRAPER_API_KEY must be at least 32 characters'),
-  CORS_ORIGINS: z
-    .string()
-    .default('http://localhost:3000')
-    .transform((value) =>
-      value
-        .split(',')
-        .map((origin) => origin.trim())
-        .filter((origin) => origin.length > 0),
-    ),
+  CORS_ORIGINS: commaSeparated('http://localhost:3000'),
+  /** Endpoint GraphQL d'AniList (catalogue externe de la recherche et de l'import). */
+  ANILIST_API_URL: z.url({ protocol: /^https$/ }).default('https://graphql.anilist.co'),
+  /** Domaines d'images autorisés par `/images/proxy` (sous-domaines inclus). */
+  IMAGE_PROXY_ALLOWED_HOSTS: commaSeparated('anilist.co,mangadex.org'),
 });
 
 export type Env = z.infer<typeof envSchema>;

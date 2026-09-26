@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { createApp } from './app.js';
 import { createContainer } from './container.js';
 import { createDatabase } from './shared/db/index.js';
+import { offlineFetch, TEST_INTEGRATIONS } from './test/fake-fetch.js';
 
 // Pool pg paresseux : aucune connexion n'est ouverte tant qu'aucune requête n'atteint la DB.
 // Ces tests ne couvrent que les chemins qui s'arrêtent avant la couche données.
@@ -15,6 +16,7 @@ const container = createContainer({
     trustedOrigins: ['http://localhost:3000'],
     rateLimit: false,
   },
+  integrations: { ...TEST_INTEGRATIONS, fetch: offlineFetch },
 });
 const app = createApp({
   services: container.services,

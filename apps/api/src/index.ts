@@ -15,6 +15,11 @@ const container = createContainer({
     baseURL: env.BETTER_AUTH_URL,
     trustedOrigins: env.CORS_ORIGINS,
   },
+  integrations: {
+    fetch,
+    anilistUrl: env.ANILIST_API_URL,
+    imageProxyAllowedHosts: env.IMAGE_PROXY_ALLOWED_HOSTS,
+  },
 });
 const app = createApp({
   services: container.services,
