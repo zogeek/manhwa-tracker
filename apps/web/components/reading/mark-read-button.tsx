@@ -10,8 +10,10 @@ import { useApiMutation } from "@/hooks/use-api-mutation";
 type MarkReadButtonProps = { chapterId: string; number: number };
 
 /**
- * « J'ai lu ce chapitre » (`POST /reading/reads`) : l'API journalise la lecture ET fait avancer
- * la progression dans la même transaction (jamais de recul si on relit un ancien chapitre).
+ * « J'ai lu ce chapitre » (`POST /reading/reads`) : l'API journalise la lecture ET place la
+ * progression sur ce chapitre, dans la même transaction. Proposé uniquement pour les chapitres
+ * non lus (relire un ancien chapitre ramènerait la position de lecture en arrière ; le record
+ * `furthestChapter`, lui, ne recule jamais).
  */
 export function MarkReadButton({ chapterId, number }: MarkReadButtonProps) {
   const { mutate, isPending } = useApiMutation();

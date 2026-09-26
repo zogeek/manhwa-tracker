@@ -4,6 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatChapter, formatDate } from "@/app/lib/format";
 import { getChapters, getProgress } from "@/app/lib/queries";
+import { ChapterActions } from "./chapter-actions";
 import { MarkReadButton } from "./mark-read-button";
 
 /** Liste des chapitres connus (du plus récent au plus ancien), avec l'état « lu » de l'utilisateur. */
@@ -53,6 +54,7 @@ export async function ChapterList({ manhwaId }: { manhwaId: string }) {
                     ) : (
                       <MarkReadButton chapterId={chapter.id} number={chapter.number} />
                     )}
+                    <ChapterActions manhwaId={manhwaId} number={chapter.number} currentChapter={readUpTo} />
                   </span>
                 </li>
               );
