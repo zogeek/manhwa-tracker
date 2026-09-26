@@ -141,6 +141,14 @@ export const manhwas = pgTable('manhwas', {
   updatedBy: text('updated_by'), // user_id Better Auth
   deletedAt: timestamptz('deleted_at'), // null = actif, sinon soft-deleted
 }, (table) => [
+  // Recherche floue (pg_trgm, migration 0005) : index GIN trigrammes, limités aux fiches actives.
+  // Servent les opérateurs `<%` (word_similarity) et `ILIKE '%…%'` de la recherche du catalogue.
+  index('manhwas_title_trgm_idx')
+    .using('gin', table.title.op('gin_trgm_ops'))
+    .where(sql`${table.deletedAt} IS NULL`),
+  index('manhwas_original_title_trgm_idx')
+    .using('gin', table.originalTitle.op('gin_trgm_ops'))
+    .where(sql`${table.deletedAt} IS NULL`),
   check('manhwas_rating_range', sql`${table.rating} IS NULL OR (${table.rating} >= 0 AND ${table.rating} <= 10)`),
   check('manhwas_total_chapters_positive', sql`${table.totalChapters} IS NULL OR ${table.totalChapters} >= 0`),
 ]);
@@ -163,6 +171,8 @@ export const manhwaTitles = pgTable('manhwa_titles', {
   createdAt: createdAt(),
 }, (table) => [
   index('manhwa_titles_manhwa_id_idx').on(table.manhwaId),
+  // Titres alternatifs / alias : même recherche floue que manhwas.title.
+  index('manhwa_titles_title_trgm_idx').using('gin', table.title.op('gin_trgm_ops')),
   // Un seul titre principal par manhwa
   uniqueIndex('manhwa_titles_one_primary_idx').on(table.manhwaId).where(sql`${table.isPrimary}`),
 ]);
@@ -392,7 +402,8 @@ export const externalLinks = pgTable('external_links', {
   createdAt: createdAt(),
 }, (table) => [
   uniqueIndex('external_links_unique_idx').on(table.manhwaId, table.provider),
-  index('external_links_provider_idx').on(table.provider, table.externalId),
+  // Une fiche externe (ex. AniList #30013) n'est rattachée qu'à un seul manhwa : garantit l'import idempotent.
+  uniqueIndex('external_links_provider_external_id_idx').on(table.provider, table.externalId),
 ]);
 
 // ============================================================
