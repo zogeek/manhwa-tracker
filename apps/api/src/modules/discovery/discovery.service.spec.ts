@@ -1,14 +1,29 @@
 import { randomUUID } from 'node:crypto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { TransactionRunner } from '../../shared/db/transaction.js';
-import { BadGatewayError, ConflictError, NotFoundError, ServiceUnavailableError } from '../../shared/lib/errors.js';
+import {
+  BadGatewayError,
+  BadRequestError,
+  ConflictError,
+  NotFoundError,
+  ServiceUnavailableError,
+} from '../../shared/lib/errors.js';
 import { TokenBucket } from '../../shared/lib/rate-limiter.js';
 import { TtlCache } from '../../shared/lib/ttl-cache.js';
+import type { JobQueue } from '../jobs/job.repository.js';
+import type { JobRequest } from '../jobs/job.types.js';
 import type { ManhwaRepository } from '../manhwas/manhwa.repository.js';
 import type { Manhwa, ManhwaSearchHit } from '../manhwas/manhwa.schema.js';
 import type { DiscoveryRepository, ExternalLinkTarget, VocabularyRef } from './discovery.repository.js';
 import { DiscoveryService, IMPORT_VOCABULARIES, type DiscoveryRepositories } from './discovery.service.js';
-import type { ExternalCatalogProvider, ExternalManhwa, ExternalProvider, ExternalTag } from './external-catalog.js';
+import {
+  externalRefKey,
+  type ExternalCatalogProvider,
+  type ExternalManhwa,
+  type ExternalProvider,
+  type ExternalRef,
+  type ExternalTag,
+} from './external-catalog.js';
 import { CachedCatalogProvider, RateLimitedCatalogProvider } from './external-catalog.decorators.js';
 
 function buildManhwa(overrides: Partial<Manhwa> = {}): Manhwa {
@@ -53,9 +68,23 @@ function buildExternal(overrides: Partial<ExternalManhwa> = {}): ExternalManhwa 
     endDate: null,
     genres: ['Action'],
     tags: [{ name: 'Magic', relevance: 90, isSpoiler: false }],
+    crossReferences: [],
     ...overrides,
   };
 }
+
+const MANGADEX_ID = 'a1c7c817-4e59-43b7-9365-09675a149a6f';
+
+/** La même œuvre vue par MangaDex, qui pointe vers son id AniList. */
+const buildMangaDex = (overrides: Partial<ExternalManhwa> = {}) =>
+  buildExternal({
+    provider: 'mangadex',
+    externalId: MANGADEX_ID,
+    url: `https://mangadex.org/title/${MANGADEX_ID}`,
+    coverUrl: `https://uploads.mangadex.org/covers/${MANGADEX_ID}/cover.jpg.512.jpg`,
+    crossReferences: [{ provider: 'anilist', externalId: '105398', url: 'https://anilist.co/manga/105398' }],
+    ...overrides,
+  });
 
 class InMemoryManhwas implements Pick<ManhwaRepository, 'search' | 'findById'> {
   readonly rows = new Map<string, Manhwa>();
@@ -74,23 +103,23 @@ class InMemoryManhwas implements Pick<ManhwaRepository, 'search' | 'findById'> {
 class InMemoryDiscoveryRepository implements DiscoveryRepository {
   readonly links = new Map<string, ExternalLinkTarget>();
   readonly attached: { manhwaId: string; vocabulary: string; tags: readonly ExternalTag[] }[] = [];
-  locks = 0;
+  readonly locked: string[][] = [];
 
   constructor(private readonly manhwas: InMemoryManhwas) {}
 
-  async lockExternalRef(): Promise<void> {
-    this.locks += 1;
+  async lockExternalRefs(refs: readonly ExternalRef[]): Promise<void> {
+    this.locked.push(refs.map(externalRefKey));
   }
 
   async findLinkedManhwa(provider: ExternalProvider, externalId: string): Promise<ExternalLinkTarget | null> {
-    return this.links.get(`${provider}:${externalId}`) ?? null;
+    return this.links.get(externalRefKey({ provider, externalId })) ?? null;
   }
 
-  async findImportedManhwaIds(provider: ExternalProvider, externalIds: readonly string[]): Promise<Map<string, string>> {
+  async findImportedManhwaIds(refs: readonly ExternalRef[]): Promise<Map<string, string>> {
     const found = new Map<string, string>();
-    for (const externalId of externalIds) {
-      const link = this.links.get(`${provider}:${externalId}`);
-      if (link && !link.deleted) found.set(externalId, link.manhwaId);
+    for (const ref of refs) {
+      const link = this.links.get(externalRefKey(ref));
+      if (link && !link.deleted) found.set(externalRefKey(ref), link.manhwaId);
     }
     return found;
   }
@@ -98,8 +127,18 @@ class InMemoryDiscoveryRepository implements DiscoveryRepository {
   async insertImportedManhwa(item: ExternalManhwa, userId: string): Promise<string> {
     const manhwa = buildManhwa({ title: item.title, createdBy: userId });
     this.manhwas.rows.set(manhwa.id, manhwa);
-    this.links.set(`${item.provider}:${item.externalId}`, { manhwaId: manhwa.id, deleted: false });
+    this.links.set(externalRefKey(item), { manhwaId: manhwa.id, deleted: false });
     return manhwa.id;
+  }
+
+  async linkExternalRefs(manhwaId: string, refs: readonly ExternalRef[]): Promise<number> {
+    let created = 0;
+    for (const ref of refs) {
+      if (this.links.has(externalRefKey(ref))) continue;
+      this.links.set(externalRefKey(ref), { manhwaId, deleted: false });
+      created += 1;
+    }
+    return created;
   }
 
   async attachTerms(manhwaId: string, vocabulary: VocabularyRef, tags: readonly ExternalTag[]): Promise<number> {
@@ -108,13 +147,24 @@ class InMemoryDiscoveryRepository implements DiscoveryRepository {
   }
 }
 
+class InMemoryJobQueue implements JobQueue {
+  readonly enqueued: JobRequest[] = [];
+
+  async enqueue(requests: readonly JobRequest[]): Promise<number> {
+    this.enqueued.push(...requests);
+    return requests.length;
+  }
+}
+
 class FakeProvider implements ExternalCatalogProvider {
-  readonly name: ExternalProvider = 'anilist';
   searchCalls = 0;
   lookups = 0;
   failWith: Error | null = null;
 
-  constructor(readonly catalog: ExternalManhwa[] = [buildExternal()]) {}
+  constructor(
+    readonly catalog: ExternalManhwa[] = [buildExternal()],
+    readonly name: ExternalProvider = 'anilist',
+  ) {}
 
   async search(): Promise<ExternalManhwa[]> {
     this.searchCalls += 1;
@@ -130,15 +180,23 @@ class FakeProvider implements ExternalCatalogProvider {
 
 let manhwas: InMemoryManhwas;
 let repo: InMemoryDiscoveryRepository;
+let jobs: InMemoryJobQueue;
 let provider: FakeProvider;
+let mangadex: FakeProvider;
 let service: DiscoveryService;
+
+function createService(providers: ExternalCatalogProvider[]) {
+  const transactions: TransactionRunner<DiscoveryRepositories> = { run: (work) => work({ discovery: repo, jobs }) };
+  return new DiscoveryService(manhwas, repo, providers, transactions, { chapterFeeds: ['mangadex'] });
+}
 
 beforeEach(() => {
   manhwas = new InMemoryManhwas();
   repo = new InMemoryDiscoveryRepository(manhwas);
+  jobs = new InMemoryJobQueue();
   provider = new FakeProvider();
-  const transactions: TransactionRunner<DiscoveryRepositories> = { run: (work) => work({ discovery: repo }) };
-  service = new DiscoveryService(manhwas, repo, [provider], transactions);
+  mangadex = new FakeProvider([buildMangaDex()], 'mangadex');
+  service = createService([provider]);
 });
 
 describe('DiscoveryService.search', () => {
@@ -187,6 +245,37 @@ describe('DiscoveryService.search', () => {
 
     await expect(service.search({ q: 'x', limit: 10, external: false })).rejects.toBeInstanceOf(TypeError);
   });
+
+  it('queries every enabled provider, each one failing independently', async () => {
+    service = createService([provider, mangadex]);
+    provider.failWith = new BadGatewayError('AniList is down');
+
+    const result = await service.search({ q: 'beginning', limit: 10, external: false });
+
+    expect(result.providers).toEqual([
+      { provider: 'anilist', status: 'unavailable' },
+      { provider: 'mangadex', status: 'ok' },
+    ]);
+    expect(result.external.map((hit) => hit.provider)).toEqual(['mangadex']);
+  });
+
+  it('restricts the search to the providers requested by the client', async () => {
+    service = createService([provider, mangadex]);
+
+    const result = await service.search({ q: 'beginning', limit: 10, external: false, providers: ['mangadex'] });
+
+    expect(result.providers).toEqual([{ provider: 'mangadex', status: 'ok' }]);
+    expect(provider.searchCalls).toBe(0);
+  });
+
+  it('flags a result as imported when the work was imported from another provider (cross reference)', async () => {
+    service = createService([mangadex]);
+    repo.links.set('anilist:105398', { manhwaId: 'local-1', deleted: false });
+
+    const result = await service.search({ q: 'beginning', limit: 10, external: false });
+
+    expect(result.external).toMatchObject([{ provider: 'mangadex', importedManhwaId: 'local-1' }]);
+  });
 });
 
 describe('DiscoveryService.importManhwa', () => {
@@ -200,7 +289,7 @@ describe('DiscoveryService.importManhwa', () => {
       IMPORT_VOCABULARIES.tags.slug,
     ]);
     expect(repo.attached[0]?.tags).toEqual([{ name: 'Action', relevance: 100, isSpoiler: false }]);
-    expect(repo.locks).toBe(1);
+    expect(repo.locked).toEqual([['anilist:105398']]);
   });
 
   it('is idempotent: a second import returns the same manhwa without calling the provider', async () => {
@@ -224,6 +313,82 @@ describe('DiscoveryService.importManhwa', () => {
     await expect(
       service.importManhwa({ provider: 'anilist', externalId: '105398' }, 'user-1'),
     ).rejects.toBeInstanceOf(ConflictError);
+  });
+
+  it('refuses a provider that is not enabled on this server', async () => {
+    await expect(
+      service.importManhwa({ provider: 'mangadex', externalId: MANGADEX_ID }, 'user-1'),
+    ).rejects.toBeInstanceOf(BadRequestError);
+  });
+});
+
+describe('DiscoveryService.importManhwa — follow-up jobs (outbox)', () => {
+  it('enqueues the cover mirror, but no chapter sync for a provider without a chapter feed', async () => {
+    provider.catalog[0] = buildExternal({ coverUrl: 'https://s4.anilist.co/cover.jpg' });
+
+    const { manhwa } = await service.importManhwa({ provider: 'anilist', externalId: '105398' }, 'user-1');
+
+    expect(jobs.enqueued).toEqual([
+      {
+        type: 'cover.mirror',
+        payload: { manhwaId: manhwa.id, imageUrl: 'https://s4.anilist.co/cover.jpg' },
+        dedupeKey: `cover.mirror:${manhwa.id}:https://s4.anilist.co/cover.jpg`,
+      },
+    ]);
+  });
+
+  it('enqueues the cover mirror and the chapter sync for a MangaDex import', async () => {
+    service = createService([provider, mangadex]);
+
+    const { manhwa } = await service.importManhwa({ provider: 'mangadex', externalId: MANGADEX_ID }, 'user-1');
+
+    expect(jobs.enqueued.map((job) => job.type)).toEqual(['cover.mirror', 'chapters.sync']);
+    expect(jobs.enqueued[1]).toEqual({
+      type: 'chapters.sync',
+      payload: { manhwaId: manhwa.id, provider: 'mangadex', externalId: MANGADEX_ID },
+      dedupeKey: `chapters.sync:${manhwa.id}:mangadex`,
+    });
+    // L'œuvre MangaDex et sa référence AniList sont rattachées à la nouvelle fiche.
+    expect(repo.links.get('anilist:105398')?.manhwaId).toBe(manhwa.id);
+  });
+
+  it('does not enqueue anything when the import is a no-op (already imported)', async () => {
+    await service.importManhwa({ provider: 'anilist', externalId: '105398' }, 'user-1');
+    jobs.enqueued.length = 0;
+
+    await service.importManhwa({ provider: 'anilist', externalId: '105398' }, 'user-2');
+
+    expect(jobs.enqueued).toEqual([]);
+  });
+});
+
+describe('DiscoveryService.importManhwa — cross-provider deduplication', () => {
+  beforeEach(() => {
+    service = createService([provider, mangadex]);
+  });
+
+  it('completes the manhwa imported from AniList instead of creating a duplicate', async () => {
+    const fromAniList = await service.importManhwa({ provider: 'anilist', externalId: '105398' }, 'user-1');
+    jobs.enqueued.length = 0;
+
+    const fromMangaDex = await service.importManhwa({ provider: 'mangadex', externalId: MANGADEX_ID }, 'user-2');
+
+    expect(fromMangaDex).toEqual({ manhwa: fromAniList.manhwa, created: false });
+    expect(manhwas.rows.size).toBe(1);
+    expect(repo.links.get(`mangadex:${MANGADEX_ID}`)?.manhwaId).toBe(fromAniList.manhwa.id);
+    // La fiche a déjà sa couverture : seuls les chapitres sont à synchroniser.
+    expect(jobs.enqueued.map((job) => job.type)).toEqual(['chapters.sync']);
+    // Les deux références sont verrouillées : un import AniList simultané attendrait son tour.
+    expect(repo.locked.at(-1)).toEqual([`mangadex:${MANGADEX_ID}`, 'anilist:105398']);
+  });
+
+  it('refuses to attach to a sibling that an admin removed', async () => {
+    repo.links.set('anilist:105398', { manhwaId: 'gone', deleted: true });
+
+    await expect(
+      service.importManhwa({ provider: 'mangadex', externalId: MANGADEX_ID }, 'user-1'),
+    ).rejects.toBeInstanceOf(ConflictError);
+    expect(jobs.enqueued).toEqual([]);
   });
 });
 

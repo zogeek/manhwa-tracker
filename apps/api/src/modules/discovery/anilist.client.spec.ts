@@ -39,6 +39,7 @@ describe('AniListClient', () => {
         { name: 'Reincarnation', relevance: 95, isSpoiler: false },
         { name: 'Magic', relevance: 90, isSpoiler: false },
       ],
+      crossReferences: [],
     });
   });
 
