@@ -1,27 +1,45 @@
 import Image from "next/image";
+import Link from "next/link";
 import { ImageOff } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import type { CatalogManhwa } from "@/app/lib/api-types";
+import { coverSrc } from "@/app/lib/cover";
 import { MANHWA_TYPE_LABELS, PUBLICATION_STATUS_LABELS } from "@/app/lib/labels";
 
 type ManhwaCardProps = {
   manhwa: Pick<CatalogManhwa, "title" | "coverUrl" | "type" | "status" | "totalChapters">;
+  /** Lien vers la fiche détaillée (couverture et titre deviennent cliquables). */
+  href?: string;
+  /** Étiquette en haut à droite de la couverture (ex. fournisseur d'un résultat externe). */
+  label?: string;
   /** Zone d'actions en pied de carte (boutons client, progression…). */
   children?: React.ReactNode;
 };
 
+/** Enveloppe `children` dans un lien quand la carte en a un. */
+function MaybeLink({ href, className, children }: { href?: string; className?: string; children: React.ReactNode }) {
+  return href ? (
+    <Link href={href} className={className}>
+      {children}
+    </Link>
+  ) : (
+    <div className={className}>{children}</div>
+  );
+}
+
 // Composant de présentation pur (sans état) : utilisable depuis un Server Component
 // comme depuis un Client Component. L'interactivité est injectée via `children`.
-export function ManhwaCard({ manhwa, children }: ManhwaCardProps) {
+export function ManhwaCard({ manhwa, href, label, children }: ManhwaCardProps) {
+  const cover = coverSrc(manhwa.coverUrl);
+
   return (
     <Card className="group gap-3 pt-0">
-      <div className="bg-muted relative aspect-[2/3] overflow-hidden">
-        {manhwa.coverUrl ? (
-          // `unoptimized` : les couvertures viennent de domaines tiers variés (sources scrapées),
-          // qu'on ne peut pas lister dans `images.remotePatterns`.
+      <MaybeLink href={href} className="bg-muted relative block aspect-[2/3] overflow-hidden">
+        {cover ? (
+          // `unoptimized` : l'image est déjà servie (et mise en cache) par le proxy d'images de l'API.
           <Image
-            src={manhwa.coverUrl}
+            src={cover}
             alt={`Couverture de ${manhwa.title}`}
             fill
             unoptimized
@@ -35,11 +53,18 @@ export function ManhwaCard({ manhwa, children }: ManhwaCardProps) {
           </div>
         )}
         <Badge className="absolute top-2 left-2 shadow-sm">{MANHWA_TYPE_LABELS[manhwa.type]}</Badge>
-      </div>
+        {label && (
+          <Badge variant="secondary" className="absolute top-2 right-2 shadow-sm">
+            {label}
+          </Badge>
+        )}
+      </MaybeLink>
 
       <CardHeader className="gap-2">
         <CardTitle className="line-clamp-2 leading-snug" title={manhwa.title}>
-          {manhwa.title}
+          <MaybeLink href={href} className="hover:underline">
+            {manhwa.title}
+          </MaybeLink>
         </CardTitle>
       </CardHeader>
 

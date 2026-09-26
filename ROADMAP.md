@@ -151,7 +151,7 @@ Les tables personnelles (`reading_progress`, `chapter_reads`, `reading_lists`) o
 
 ---
 
-## 4. Frontend (`apps/web/`) — 🟢 Catalogue et bibliothèque fonctionnels
+## 4. Frontend (`apps/web/`) — 🟢 Recherche, import, fiche détaillée et bibliothèque fonctionnels
 
 | Élément | État |
 |---|---|
@@ -160,22 +160,15 @@ Les tables personnelles (`reading_progress`, `chapter_reads`, `reading_lists`) o
 | Client RPC (`app/lib/api.ts`) | ✅ `hc<AppType>` — appels serveur au nom de l'utilisateur via `getForwardedAuthHeaders()` |
 | Auth | ✅ `/login` (connexion / inscription), menu utilisateur (`useSession`) avec déconnexion |
 | Layout | ✅ Sidebar shadcn repliable (Catalogue, Ma Bibliothèque, Paramètres) + header |
-| Pages | ✅ Accueil (bienvenue + statistiques), Catalogue (grille de `ManhwaCard` + bouton « Ajouter à ma bibliothèque »), Ma Bibliothèque (groupée par statut, +1 chapitre, changement de statut, mises à jour optimistes) ; 🚧 Paramètres (lecture seule) |
+| Pages | ✅ Accueil (bienvenue + statistiques) ; Catalogue : recherche dans l'URL (`?q=&external=true`, anti-rebond, tolérante aux fautes), résultats locaux + AniList/MangaDex/Kitsu streamés (`<Suspense>` + squelettes), import en un clic (toast, `router.refresh()`), fournisseurs en panne signalés sans casser la page ; Fiche `/manhwas/[id]` : couverture via le proxy, synopsis, genres/thèmes (spoilers repliés), progression (+1, statut) et chapitres « Lu » (`POST /reading/reads`), sections streamées ; Ma Bibliothèque (groupée par statut, cartes liées aux fiches) ; 🚧 Paramètres (lecture seule) |
 | Types front | ✅ Déduits du contrat RPC (`app/lib/api-types.ts`, `InferResponseType`/`InferRequestType`) — aucune interface dupliquée ; libellés FR exhaustifs par enum (`app/lib/labels.ts`) |
-| Mutations client | ✅ Hook `useApiMutation` : appel Hono RPC via le proxy, transition React + `router.refresh()`, erreurs affichées (401/403/réseau) |
-| UI (`components/ui`) | ✅ shadcn (style `radix-nova`, alias `utils` → paquet `cn`) : badge, button, card, input, label, field, dropdown-menu, select, sidebar, avatar, separator, sheet, tooltip, skeleton |
+| Données serveur | ✅ `app/lib/queries.ts` (`server-only`) : lectures RPC mémoïsées par `cache()` (la page, `generateMetadata` et les sections streamées partagent un seul appel) |
+| Mutations client | ✅ Hook `useApiMutation` : appel Hono RPC via le proxy, transition React + `router.refresh()`, `onSuccess`/`onError`, toasts Sonner, messages FR par statut (`app/lib/api-errors.ts`) |
+| États de chargement / erreurs | ✅ `loading.tsx` (catalogue, fiche), squelettes par section, `error.tsx` (bouton « Réessayer », `retry()` de Next 16), `not-found.tsx` pour une fiche inconnue |
+| UI (`components/ui`) | ✅ shadcn (style `radix-nova`, alias `utils` → paquet `cn`) : badge, button, card, input, label, field, dropdown-menu, select, sidebar, avatar, separator, sheet, tooltip, skeleton, sonner |
 | TypeScript / Lint | ✅ 0 erreur, 0 avertissement |
-| Tests (Vitest + Playwright) | ❌ À mettre en place |
-
----|---|
-| Proxy same-origin (`next.config.ts`) | ✅ `/api/auth/*` → Hono `/api/auth/*`, `/api/*` → Hono `/*` (`API_INTERNAL_URL`, figé au build) |
-| Client RPC (`app/lib/api.ts`) | ✅ `hc<AppType>` — `AppType` importé du paquet workspace `api` |
-| Auth (`app/lib/auth-client.ts`) | ✅ Client Better Auth + plugin admin (aucune page de connexion pour l'instant) |
-| UI | 🧹 Supprimée : une seule page `/` (« Projet Vierge »), layout minimal, aucun composant — shadcn (`components.json`) réinstallera les composants un par un |
-| Styles (`app/globals.css`) | ✅ Socle Tailwind v4 + variables de thème shadcn uniquement (config CSS-first, pas de `tailwind.config.ts`) |
-| TypeScript | ✅ 0 erreur (`pnpm --filter web typecheck`) |
-| Lint | ✅ 0 erreur, 0 avertissement (`pnpm --filter web lint`) |
-| Tests (Vitest + Playwright) | ❌ À mettre en place |
+| Tests composants (Vitest + Testing Library, jsdom) | ✅ `pnpm --filter web test` : recherche (anti-rebond, URL), import (succès/409/réseau), « Lu », URL de couverture |
+| Tests E2E (Playwright) | ❌ À mettre en place |
 
 ---
 
@@ -203,6 +196,8 @@ Worker Python isolé (FastAPI/Playwright) qui poussera ses données vers l'API H
 - Frontend : catalogue (grille, ajout à la bibliothèque) et bibliothèque (+1 chapitre, statut)
 - « Super-backend » : recherche floue `pg_trgm`, repli + import AniList (genres/tags créés à la volée, résolution par alias), proxy d'images anti-SSRF, cache TTL et limiteur de débit
 - Multi-fournisseurs (Strategy) : MangaDex en plus d'AniList, filtre `?providers=`, références croisées anti-doublon ; outbox + worker `SKIP LOCKED` (miroir des couvertures sur disque, synchronisation des chapitres MangaDex)
+- 3ᵉ fournisseur Kitsu (preuve de l'Open/Closed : aucune ligne du service modifiée)
+- Frontend découverte : recherche + import depuis les 3 catalogues, fiche détaillée (tags, chapitres, progression), squelettes / toasts / frontière d'erreur, tests composants Vitest
 
 ### 🔴 Priorité suivante — Sécurité & robustesse API
 
@@ -218,7 +213,7 @@ Routes pour `manhwa_titles`, `manhwa_authors`, `manhwa_genres`, `manhwa_sources`
 
 ### 🟡 Frontend
 
-Vitest (composants) + Playwright (E2E), tags de genre sur les cartes (embarquer les termes dans `GET /manhwas` pour éviter N+1 requêtes), pagination cursor du catalogue, fiche manhwa détaillée, retrait de la bibliothèque, gestion des listes personnalisées, édition du profil.
+Playwright (E2E), tags de genre sur les cartes (embarquer les termes dans `GET /manhwas` pour éviter N+1 requêtes), pagination cursor du catalogue, auteurs et titres alternatifs sur la fiche (routes API à créer), couverture miroir (`storageKey`) exposée par l'API, retrait de la bibliothèque, gestion des listes personnalisées, édition du profil.
 
 ### 🟤 Scraper
 
