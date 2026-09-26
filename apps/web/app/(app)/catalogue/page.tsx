@@ -1,58 +1,89 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { BookOpen } from "lucide-react";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { AddToLibraryButton } from "@/components/manhwa/add-to-library-button";
 import { ManhwaCard } from "@/components/manhwa/manhwa-card";
+import { ManhwaGrid, ManhwaGridSkeleton } from "@/components/manhwa/manhwa-grid";
+import { CatalogSearch } from "@/components/search/catalog-search";
+import { SearchResults } from "@/components/search/search-results";
 import { api } from "@/app/lib/api";
-import { getForwardedAuthHeaders, verifySession } from "@/app/lib/dal";
+import { verifySession } from "@/app/lib/dal";
+import { getLibraryIds } from "@/app/lib/queries";
+import { MIN_QUERY_LENGTH } from "@/app/lib/search";
 
 export const metadata: Metadata = { title: "Catalogue" };
 
-// Server Component : catalogue et bibliothèque sont lus côté serveur (en parallèle), puis seul
-// le bouton « Ajouter » est hydraté côté client.
-export default async function CataloguePage() {
+type CataloguePageProps = {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+};
+
+// Server Component : la recherche vit dans l'URL (`?q=…&external=true`). La page la relit,
+// affiche immédiatement l'en-tête et la barre, puis « streame » les résultats via <Suspense>.
+export default async function CataloguePage({ searchParams }: CataloguePageProps) {
   await verifySession();
-  const authHeaders = await getForwardedAuthHeaders();
-
-  const [catalogRes, libraryRes] = await Promise.all([
-    api.manhwas.$get(),
-    api.reading.progress.$get({}, { headers: authHeaders }),
-  ]);
-  if (!catalogRes.ok) throw new Error(`Catalogue indisponible (HTTP ${catalogRes.status})`);
-
-  const { data: manhwas } = await catalogRes.json();
-  // Bibliothèque indisponible : on affiche quand même le catalogue (les boutons restent utilisables).
-  const library = libraryRes.ok ? (await libraryRes.json()).data : [];
-  const followedIds = new Set(library.map((entry) => entry.manhwaId));
+  const params = await searchParams;
+  const q = typeof params["q"] === "string" ? params["q"].trim() : "";
+  const external = params["external"] === "true";
+  const searching = q.length >= MIN_QUERY_LENGTH;
 
   return (
     <>
       <header className="space-y-1">
         <h1 className="text-2xl font-semibold tracking-tight">Catalogue</h1>
         <p className="text-muted-foreground">
-          {manhwas.length} série{manhwas.length > 1 ? "s" : ""} disponible{manhwas.length > 1 ? "s" : ""}.
+          Retrouvez une série de notre catalogue, ou importez-la depuis AniList, MangaDex ou Kitsu.
         </p>
       </header>
 
-      {manhwas.length === 0 ? (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <BookOpen className="size-4" aria-hidden />
-              Le catalogue est vide
-            </CardTitle>
-            <CardDescription>Les séries apparaîtront ici dès leur import par le scraper.</CardDescription>
-          </CardHeader>
-        </Card>
+      <CatalogSearch />
+
+      {searching ? (
+        // `key` : une nouvelle recherche remonte la frontière Suspense → le squelette réapparaît.
+        <Suspense key={`${q}|${external}`} fallback={<ManhwaGridSkeleton />}>
+          <SearchResults q={q} external={external} />
+        </Suspense>
       ) : (
-        <section className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-          {manhwas.map((manhwa) => (
-            <ManhwaCard key={manhwa.id} manhwa={manhwa}>
-              <AddToLibraryButton manhwaId={manhwa.id} inLibrary={followedIds.has(manhwa.id)} />
-            </ManhwaCard>
-          ))}
-        </section>
+        <Suspense fallback={<ManhwaGridSkeleton />}>
+          <CatalogGrid />
+        </Suspense>
       )}
     </>
+  );
+}
+
+/** Tout le catalogue local (affiché quand aucune recherche n'est en cours). */
+async function CatalogGrid() {
+  const [catalogRes, libraryIds] = await Promise.all([api.manhwas.$get(), getLibraryIds()]);
+  if (!catalogRes.ok) throw new Error(`Catalogue indisponible (HTTP ${catalogRes.status})`);
+  const { data: manhwas } = await catalogRes.json();
+
+  if (manhwas.length === 0) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <BookOpen className="size-4" aria-hidden />
+            Le catalogue est vide
+          </CardTitle>
+          <CardDescription>Lancez une recherche ci-dessus pour importer vos premières séries.</CardDescription>
+        </CardHeader>
+      </Card>
+    );
+  }
+
+  return (
+    <section className="space-y-3" aria-labelledby="catalog-all">
+      <h2 id="catalog-all" className="text-lg font-semibold">
+        Toutes les séries <span className="text-muted-foreground font-normal">({manhwas.length})</span>
+      </h2>
+      <ManhwaGrid>
+        {manhwas.map((manhwa) => (
+          <ManhwaCard key={manhwa.id} manhwa={manhwa} href={`/manhwas/${manhwa.id}`}>
+            <AddToLibraryButton manhwaId={manhwa.id} inLibrary={libraryIds.has(manhwa.id)} />
+          </ManhwaCard>
+        ))}
+      </ManhwaGrid>
+    </section>
   );
 }
