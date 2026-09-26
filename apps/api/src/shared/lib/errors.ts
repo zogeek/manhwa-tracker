@@ -9,7 +9,9 @@ export type ErrorCode =
   | 'CONFLICT'
   | 'UNPROCESSABLE_ENTITY'
   | 'PAYLOAD_TOO_LARGE'
-  | 'INTERNAL_ERROR';
+  | 'INTERNAL_ERROR'
+  | 'BAD_GATEWAY'
+  | 'SERVICE_UNAVAILABLE';
 
 export type ErrorDetail = {
   path: string;
@@ -75,5 +77,19 @@ export class UnprocessableEntityError extends AppError {
 export class PayloadTooLargeError extends AppError {
   constructor(message = 'Payload too large') {
     super(413, 'PAYLOAD_TOO_LARGE', message);
+  }
+}
+
+/** Un service tiers (AniList, CDN d'images…) a répondu une erreur ou une donnée invalide. */
+export class BadGatewayError extends AppError {
+  constructor(message: string, options?: ErrorOptions) {
+    super(502, 'BAD_GATEWAY', message, undefined, options);
+  }
+}
+
+/** Un service tiers est temporairement indisponible pour nous (quota de requêtes atteint…). */
+export class ServiceUnavailableError extends AppError {
+  constructor(message: string, options?: ErrorOptions) {
+    super(503, 'SERVICE_UNAVAILABLE', message, undefined, options);
   }
 }
