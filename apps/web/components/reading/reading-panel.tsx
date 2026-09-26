@@ -1,11 +1,12 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { LibraryEntryControls } from "@/components/library/library-entry-controls";
 import { AddToLibraryButton } from "@/components/manhwa/add-to-library-button";
 import type { ManhwaDetail } from "@/app/lib/api-types";
 import { getProgress } from "@/app/lib/queries";
+import { ProgressEditor } from "./progress-editor";
+import { StatusSelect } from "./status-select";
 
-/** Encart « Ma lecture » : ajout à la bibliothèque, puis progression (+1 chapitre, statut). */
+/** Encart « Ma lecture » : ajout à la bibliothèque, puis saisie directe du chapitre et statut. */
 export async function ReadingPanel({ manhwa }: { manhwa: Pick<ManhwaDetail, "id" | "title" | "totalChapters"> }) {
   const progress = await getProgress(manhwa.id);
 
@@ -17,15 +18,15 @@ export async function ReadingPanel({ manhwa }: { manhwa: Pick<ManhwaDetail, "id"
       </CardHeader>
       <CardContent className="flex flex-col gap-2">
         {progress ? (
-          // Même composant que dans la bibliothèque : une seule façon de mettre à jour sa progression.
-          <LibraryEntryControls
-            entry={{
-              manhwaId: manhwa.id,
-              status: progress.status,
-              currentChapter: progress.currentChapter,
-              manhwa: { title: manhwa.title, totalChapters: manhwa.totalChapters },
-            }}
-          />
+          <>
+            <ProgressEditor
+              manhwaId={manhwa.id}
+              title={manhwa.title}
+              currentChapter={progress.currentChapter}
+              totalChapters={manhwa.totalChapters}
+            />
+            <StatusSelect manhwaId={manhwa.id} title={manhwa.title} status={progress.status} className="w-full" />
+          </>
         ) : (
           <AddToLibraryButton manhwaId={manhwa.id} inLibrary={false} />
         )}
