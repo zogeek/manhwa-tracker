@@ -15,6 +15,10 @@ const container = createContainer({
     baseURL: env.BETTER_AUTH_URL,
     trustedOrigins: env.CORS_ORIGINS,
   },
+  integrations: {
+    fetch,
+    anilistUrl: env.ANILIST_API_URL,
+  },
 });
 const app = createApp({
   services: container.services,

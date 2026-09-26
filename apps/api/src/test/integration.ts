@@ -7,13 +7,20 @@ import { createApp } from '../app.js';
 import { createContainer } from '../container.js';
 import { ADMIN_ROLE } from '../shared/auth/index.js';
 import { createDatabase } from '../shared/db/index.js';
+import type { HttpFetch } from '../shared/http/outbound.js';
 import { user } from '../shared/db/schema.js';
+import { offlineFetch, TEST_INTEGRATIONS } from './fake-fetch.js';
 
 export const TEST_ORIGIN = 'http://localhost:3000';
 export const TEST_SCRAPER_API_KEY = 'integration-tests-scraper-key-0123456789abcdef';
 
+export type TestContextOptions = {
+  /** Faux client HTTP sortant (AniList, CDN d'images) ; hors-ligne par défaut. */
+  fetch?: HttpFetch;
+};
+
 /** App complète (vraie DB de test, vrai Better Auth) + client RPC typé. */
-export function createTestContext() {
+export function createTestContext({ fetch = offlineFetch }: TestContextOptions = {}) {
   const database = createDatabase(inject('databaseUrl'));
   const container = createContainer({
     db: database.db,
@@ -23,6 +30,7 @@ export function createTestContext() {
       trustedOrigins: [TEST_ORIGIN],
       rateLimit: false,
     },
+    integrations: { ...TEST_INTEGRATIONS, fetch },
   });
   const app = createApp({
     services: container.services,

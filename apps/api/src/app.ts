@@ -48,7 +48,7 @@ export function createApp({ services, auth, corsOrigins, scraperApiKey, logReque
   return app
     .get('/health', (c) => c.json({ status: 'ok' }))
     .route('/sources', createSourceRoutes(services.sources, authMiddleware))
-    .route('/manhwas', createManhwaRoutes(services.manhwas, authMiddleware))
+    .route('/manhwas', createManhwaRoutes(services.manhwas, services.discovery, authMiddleware))
     .route('/chapters', createChapterRoutes(services.chapters, authMiddleware))
     .route('/taxonomy', createTaxonomyRoutes(services.taxonomy, authMiddleware))
     .route('/reading', createReadingProgressRoutes(services.readingProgress, authMiddleware))
