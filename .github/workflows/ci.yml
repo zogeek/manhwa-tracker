@@ -51,8 +51,16 @@ jobs:
           node-version: 24
           cache: pnpm
 
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: apps/scraper/uv.lock
+
       - name: Install JS dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Install Python dependencies
+        run: uv sync --locked --project apps/scraper
 
       - name: Lint
         run: pnpm lint
@@ -60,7 +68,7 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
-      - name: Tests (Vitest)
+      - name: Tests (Vitest + pytest)
         run: pnpm test
 
       - name: Build
