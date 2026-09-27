@@ -1,0 +1,58 @@
+name: CodeQL
+
+on:
+  pull_request:
+    branches: [dev, master]
+  push:
+    branches: [dev, master]
+  # Les requêtes CodeQL s'enrichissent chaque semaine : une faille découverte demain dans un motif
+  # de code déjà mergé doit remonter même si personne ne touche au fichier.
+  schedule:
+    - cron: "27 4 * * 1" # lundi 04:27 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    # Nom stable : c'est lui qu'exige la protection de branche (« Analyze (javascript-typescript) »).
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+      security-events: write # publier les alertes dans l'onglet Security
+    strategy:
+      fail-fast: false # un langage en échec ne doit pas masquer le résultat des autres
+      matrix:
+        include:
+          # Langages interprétés : analyse du code source, sans compilation ni installation des dépendances.
+          - language: javascript-typescript
+            build-mode: none
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          # Au-delà du jeu par défaut : SSRF, injections, secrets en clair, redirections ouvertes…
+          queries: security-extended
+          config: |
+            paths-ignore:
+              - "**/node_modules/**"
+              - "**/dist/**"
+              - "**/.next/**"
+              - "apps/api/drizzle/**"
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:${{ matrix.language }}

@@ -203,13 +203,13 @@ Worker Python isolé (FastAPI/Playwright) qui poussera ses données vers l'API H
 - Auteurs (AniList, MangaDex ; Kitsu n'expose pas l'équipe des mangas) dédoublonnés par nom natif, table pivot ordonnée ; couvertures locales exposées par l'API (`localCoverUrl`) et affichées avec repli ; `/settings`
 - Stabilisation : URLs en anglais (`/catalog`, `/library`) avec redirections, boutons de carte responsives, synchronisation des chapitres agnostique (pilotée par les liens de l'œuvre)
 - Progression avancée : saisie directe du chapitre, « Lu jusqu'ici » (mise à jour absolue, sans faux historique), « Annuler », bibliothèque en onglets ; l'API passe une série « à lire » en « en cours » dès qu'on saisit un chapitre
+- CI GitHub Actions (PR vers `dev`/`master` : lint → typecheck → tests Vitest → build ; migrations sur Postgres 16 éphémère + drift check), CodeQL JavaScript/TypeScript (`security-extended`, hebdomadaire) et template de PR
 
 ### 🔴 Priorité suivante — Sécurité & robustesse API
 
 | Tâche | Pourquoi |
 |---|---|
 | Pagination cursor-based sur les `GET` de liste | `GET /chapters` renvoie toute la table |
-| CI GitHub Actions (typecheck → test → build, drift check des migrations) | Règle CLAUDE.md |
 | Durcir l'auth du scraper (signature HMAC horodatée ou mTLS, rotation de clé) | La clé statique `x-api-key` est un premier niveau (cf. CLAUDE.md) |
 
 ### 🟠 Tables pivot / enrichissement
