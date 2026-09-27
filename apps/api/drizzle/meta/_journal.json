@@ -64,6 +64,13 @@
       "when": 1790519741497,
       "tag": "0008_authors_identity_and_position",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1790521986798,
+      "tag": "0009_scanlation_group_identity_and_collaborations",
+      "breakpoints": true
     }
   ]
 }
