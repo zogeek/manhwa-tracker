@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { authClient } from "@/app/lib/auth-client";
+import { ROUTES } from "@/app/lib/routes";
 
 type Mode = "signIn" | "signUp";
 
@@ -40,7 +41,7 @@ export function LoginForm() {
       return;
     }
     // Nouveau cookie : on navigue puis on redemande aux Server Components un rendu avec la session.
-    router.push("/");
+    router.push(ROUTES.home);
     router.refresh();
   };
 

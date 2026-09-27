@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { authClient, isAdmin } from "@/app/lib/auth-client";
+import { ROUTES } from "@/app/lib/routes";
 
 const initials = (name: string) =>
   name
@@ -34,7 +35,7 @@ export function UserMenu() {
   if (!session) {
     return (
       <Button asChild size="sm">
-        <Link href="/login">
+        <Link href={ROUTES.login}>
           <LogIn />
           Se connecter
         </Link>
@@ -45,7 +46,7 @@ export function UserMenu() {
   const signOut = async () => {
     await authClient.signOut();
     // Les Server Components ont été rendus avec l'ancienne session : on force un nouveau rendu.
-    router.push("/login");
+    router.push(ROUTES.login);
     router.refresh();
   };
 
@@ -66,7 +67,7 @@ export function UserMenu() {
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuItem asChild>
-          <Link href="/parametres">
+          <Link href={ROUTES.settings}>
             <Settings />
             Paramètres
           </Link>

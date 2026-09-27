@@ -5,6 +5,7 @@ import { adminClient } from "better-auth/client/plugins";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { cache } from "react";
+import { ROUTES } from "./routes";
 
 // Data Access Layer : seul point d'accès à la session côté serveur (Server Components).
 // `server-only` fait échouer le build si un Client Component importe ce module.
@@ -36,6 +37,6 @@ export const getSession = cache(async (): Promise<Session | null> => {
 /** Garde des pages protégées : renvoie la session ou redirige vers /login. */
 export const verifySession = cache(async (): Promise<Session> => {
   const session = await getSession();
-  if (!session) redirect("/login");
+  if (!session) redirect(ROUTES.login);
   return session;
 });

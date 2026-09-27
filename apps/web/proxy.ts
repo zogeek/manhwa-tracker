@@ -1,7 +1,8 @@
 import { getSessionCookie } from "better-auth/cookies";
 import { NextResponse, type NextRequest } from "next/server";
+import { ROUTES } from "./app/lib/routes";
 
-const PUBLIC_PATHS = ["/login"];
+const PUBLIC_PATHS = [ROUTES.login];
 
 /**
  * Vérification *optimiste* (cf. doc Next.js « Optimistic checks with Proxy ») : on regarde
@@ -12,7 +13,7 @@ const PUBLIC_PATHS = ["/login"];
 export function proxy(request: NextRequest) {
   const isPublic = PUBLIC_PATHS.some((path) => request.nextUrl.pathname.startsWith(path));
   if (!isPublic && !getSessionCookie(request)) {
-    return NextResponse.redirect(new URL("/login", request.url));
+    return NextResponse.redirect(new URL(ROUTES.login, request.url));
   }
   return NextResponse.next();
 }

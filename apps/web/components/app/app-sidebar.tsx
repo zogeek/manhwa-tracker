@@ -10,6 +10,7 @@ import {
   SidebarRail,
 } from "@/components/ui/sidebar";
 import { NavMain } from "./nav-main";
+import { ROUTES } from "@/app/lib/routes";
 
 // Server Component : contenu statique (logo, structure). Seule la navigation active est client.
 export function AppSidebar() {
@@ -19,7 +20,7 @@ export function AppSidebar() {
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" asChild>
-              <Link href="/">
+              <Link href={ROUTES.home}>
                 <div className="bg-sidebar-primary text-sidebar-primary-foreground flex aspect-square size-8 items-center justify-center rounded-lg">
                   <BookMarked className="size-4" />
                 </div>
