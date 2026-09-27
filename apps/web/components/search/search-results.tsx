@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ArrowRight, CircleAlert, Globe, SearchX } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { CARD_ACTION_CLASS } from "@/components/manhwa/card-action";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { AddToLibraryButton } from "@/components/manhwa/add-to-library-button";
 import { ManhwaCard } from "@/components/manhwa/manhwa-card";
@@ -112,7 +113,7 @@ export async function SearchResults({ q, external }: SearchResultsProps) {
                   href={hit.importedManhwaId ? ROUTES.manhwa(hit.importedManhwaId) : undefined}
                 >
                   {hit.importedManhwaId ? (
-                    <Button variant="secondary" asChild>
+                    <Button variant="secondary" asChild className={CARD_ACTION_CLASS}>
                       <Link href={ROUTES.manhwa(hit.importedManhwaId)}>
                         Voir la fiche
                         <ArrowRight data-icon="inline-end" />

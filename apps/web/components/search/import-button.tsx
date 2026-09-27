@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Download, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { CARD_ACTION_CLASS } from "@/components/manhwa/card-action";
 import { api } from "@/app/lib/api";
 import type { ExternalProvider } from "@/app/lib/api-types";
 import { useApiMutation } from "@/hooks/use-api-mutation";
@@ -42,7 +43,7 @@ export function ImportButton({ provider, externalId, title }: ImportButtonProps)
     });
 
   return (
-    <Button onClick={importWork} disabled={isPending} aria-busy={isPending}>
+    <Button onClick={importWork} disabled={isPending} aria-busy={isPending} className={CARD_ACTION_CLASS}>
       {isPending ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Download data-icon="inline-start" />}
       {isPending ? "Import en cours…" : "Importer"}
     </Button>
