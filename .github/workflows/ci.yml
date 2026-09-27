@@ -1,0 +1,111 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [dev, master]
+  # Revalide la branche cible après chaque merge (un merge peut casser ce que deux PR vertes ne cassaient pas).
+  push:
+    branches: [dev, master]
+  workflow_dispatch:
+
+# Un nouveau push sur la même PR annule le run précédent, devenu inutile.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  TURBO_TELEMETRY_DISABLED: 1
+  FORCE_COLOR: 1
+
+jobs:
+  quality:
+    name: Lint · Typecheck · Tests · Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      # Base de test dédiée aux specs d'intégration de l'API (TEST_DATABASE_URL, cf. src/test/global-setup.ts).
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: manhwa_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/manhwa_test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4 # version lue dans `packageManager` (package.json)
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Tests (Vitest)
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
+  migrations:
+    name: Migrations Drizzle · drift check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: manhwa_ci
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/manhwa_ci
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile --filter api...
+
+      - name: Apply migrations on an empty Postgres 16
+        run: pnpm --filter api db:migrate
+
+      - name: Drift check (schema.ts ↔ migrations commitées)
+        run: |
+          pnpm --filter api db:generate
+          if [ -n "$(git status --porcelain -- apps/api/drizzle)" ]; then
+            echo "::error::schema.ts a changé sans migration commitée. Lancer 'pnpm --filter api db:generate' et commiter apps/api/drizzle/."
+            git status --porcelain -- apps/api/drizzle
+            exit 1
+          fi
