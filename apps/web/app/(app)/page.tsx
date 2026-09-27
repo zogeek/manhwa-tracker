@@ -5,6 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { api } from "@/app/lib/api";
 import { getForwardedAuthHeaders, verifySession } from "@/app/lib/dal";
 import { isAdmin } from "@/app/lib/auth-client";
+import { ROUTES } from "@/app/lib/routes";
 
 export const metadata: Metadata = { title: "Accueil" };
 
@@ -54,7 +55,7 @@ export default async function DashboardPage() {
           </CardHeader>
           <CardContent>
             <Button asChild>
-              <Link href="/catalogue">Explorer le catalogue</Link>
+              <Link href={ROUTES.catalog}>Explorer le catalogue</Link>
             </Button>
           </CardContent>
         </Card>

@@ -11,6 +11,9 @@ export type ExternalRef = {
   url: string | null;
 };
 
+export const isExternalProvider = (value: string): value is ExternalProvider =>
+  EXTERNAL_PROVIDERS.some((provider) => provider === value);
+
 export const externalRefKey = ({ provider, externalId }: Pick<ExternalRef, 'provider' | 'externalId'>): string =>
   `${provider}:${externalId}`;
 

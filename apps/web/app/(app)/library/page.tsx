@@ -9,6 +9,7 @@ import { api } from "@/app/lib/api";
 import { getForwardedAuthHeaders, verifySession } from "@/app/lib/dal";
 import { READING_STATUSES } from "@/app/lib/labels";
 import { ALL_TAB, type LibraryTab } from "@/app/lib/library";
+import { ROUTES } from "@/app/lib/routes";
 
 export const metadata: Metadata = { title: "Ma Bibliothèque" };
 
@@ -48,7 +49,7 @@ export default async function LibraryPage({ searchParams }: LibraryPageProps) {
           </CardHeader>
           <CardContent>
             <Button asChild>
-              <Link href="/catalogue">Explorer le catalogue</Link>
+              <Link href={ROUTES.catalog}>Explorer le catalogue</Link>
             </Button>
           </CardContent>
         </Card>
@@ -59,7 +60,7 @@ export default async function LibraryPage({ searchParams }: LibraryPageProps) {
             key: entry.id,
             status: entry.status,
             card: (
-              <ManhwaCard manhwa={entry.manhwa} href={`/manhwas/${entry.manhwaId}`}>
+              <ManhwaCard manhwa={entry.manhwa} href={ROUTES.manhwa(entry.manhwaId)}>
                 <LibraryEntryControls entry={entry} />
               </ManhwaCard>
             ),

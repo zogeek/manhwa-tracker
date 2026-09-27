@@ -11,6 +11,7 @@ import { api } from "@/app/lib/api";
 import { verifySession } from "@/app/lib/dal";
 import { getLibraryIds } from "@/app/lib/queries";
 import { MIN_QUERY_LENGTH } from "@/app/lib/search";
+import { ROUTES } from "@/app/lib/routes";
 
 export const metadata: Metadata = { title: "Catalogue" };
 
@@ -79,7 +80,7 @@ async function CatalogGrid() {
       </h2>
       <ManhwaGrid>
         {manhwas.map((manhwa) => (
-          <ManhwaCard key={manhwa.id} manhwa={manhwa} href={`/manhwas/${manhwa.id}`}>
+          <ManhwaCard key={manhwa.id} manhwa={manhwa} href={ROUTES.manhwa(manhwa.id)}>
             <AddToLibraryButton manhwaId={manhwa.id} inLibrary={libraryIds.has(manhwa.id)} />
           </ManhwaCard>
         ))}

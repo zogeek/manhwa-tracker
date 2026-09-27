@@ -187,7 +187,7 @@ let service: DiscoveryService;
 
 function createService(providers: ExternalCatalogProvider[]) {
   const transactions: TransactionRunner<DiscoveryRepositories> = { run: (work) => work({ discovery: repo, jobs }) };
-  return new DiscoveryService(manhwas, repo, providers, transactions, { chapterFeeds: ['mangadex'] });
+  return new DiscoveryService(manhwas, repo, providers, transactions);
 }
 
 beforeEach(() => {
@@ -323,21 +323,23 @@ describe('DiscoveryService.importManhwa', () => {
 });
 
 describe('DiscoveryService.importManhwa — follow-up jobs (outbox)', () => {
-  it('enqueues the cover mirror, but no chapter sync for a provider without a chapter feed', async () => {
+  it('enqueues the cover mirror and a provider-agnostic chapter sync, even for a provider without chapters', async () => {
     provider.catalog[0] = buildExternal({ coverUrl: 'https://s4.anilist.co/cover.jpg' });
 
     const { manhwa } = await service.importManhwa({ provider: 'anilist', externalId: '105398' }, 'user-1');
 
+    // Le service ne sait pas qui fournit des chapitres : la tâche décidera d'après les liens de l'œuvre.
     expect(jobs.enqueued).toEqual([
       {
         type: 'cover.mirror',
         payload: { manhwaId: manhwa.id, imageUrl: 'https://s4.anilist.co/cover.jpg' },
         dedupeKey: `cover.mirror:${manhwa.id}:https://s4.anilist.co/cover.jpg`,
       },
+      { type: 'chapters.sync', payload: { manhwaId: manhwa.id }, dedupeKey: `chapters.sync:${manhwa.id}` },
     ]);
   });
 
-  it('enqueues the cover mirror and the chapter sync for a MangaDex import', async () => {
+  it('names only the work in the chapter sync, never the provider it came from', async () => {
     service = createService([provider, mangadex]);
 
     const { manhwa } = await service.importManhwa({ provider: 'mangadex', externalId: MANGADEX_ID }, 'user-1');
@@ -345,8 +347,8 @@ describe('DiscoveryService.importManhwa — follow-up jobs (outbox)', () => {
     expect(jobs.enqueued.map((job) => job.type)).toEqual(['cover.mirror', 'chapters.sync']);
     expect(jobs.enqueued[1]).toEqual({
       type: 'chapters.sync',
-      payload: { manhwaId: manhwa.id, provider: 'mangadex', externalId: MANGADEX_ID },
-      dedupeKey: `chapters.sync:${manhwa.id}:mangadex`,
+      payload: { manhwaId: manhwa.id },
+      dedupeKey: `chapters.sync:${manhwa.id}`,
     });
     // L'œuvre MangaDex et sa référence AniList sont rattachées à la nouvelle fiche.
     expect(repo.links.get('anilist:105398')?.manhwaId).toBe(manhwa.id);
@@ -376,7 +378,7 @@ describe('DiscoveryService.importManhwa — cross-provider deduplication', () =>
     expect(fromMangaDex).toEqual({ manhwa: fromAniList.manhwa, created: false });
     expect(manhwas.rows.size).toBe(1);
     expect(repo.links.get(`mangadex:${MANGADEX_ID}`)?.manhwaId).toBe(fromAniList.manhwa.id);
-    // La fiche a déjà sa couverture : seuls les chapitres sont à synchroniser.
+    // La fiche a déjà sa couverture ; ses nouveaux liens (MangaDex) justifient une nouvelle synchronisation.
     expect(jobs.enqueued.map((job) => job.type)).toEqual(['chapters.sync']);
     // Les deux références sont verrouillées : un import AniList simultané attendrait son tour.
     expect(repo.locked.at(-1)).toEqual([`mangadex:${MANGADEX_ID}`, 'anilist:105398']);

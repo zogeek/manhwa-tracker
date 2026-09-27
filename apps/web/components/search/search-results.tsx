@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ArrowRight, CircleAlert, Globe, SearchX } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { CARD_ACTION_CLASS } from "@/components/manhwa/card-action";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { AddToLibraryButton } from "@/components/manhwa/add-to-library-button";
 import { ManhwaCard } from "@/components/manhwa/manhwa-card";
@@ -9,6 +10,7 @@ import { api } from "@/app/lib/api";
 import type { ExternalProvider, ProviderReport } from "@/app/lib/api-types";
 import { getLibraryIds } from "@/app/lib/queries";
 import { ImportButton } from "./import-button";
+import { ROUTES } from "@/app/lib/routes";
 
 export const PROVIDER_LABELS: Record<ExternalProvider, string> = {
   anilist: "AniList",
@@ -72,14 +74,14 @@ export async function SearchResults({ q, external }: SearchResultsProps) {
           </h2>
           <ManhwaGrid>
             {data.local.map((manhwa) => (
-              <ManhwaCard key={manhwa.id} manhwa={manhwa} href={`/manhwas/${manhwa.id}`}>
+              <ManhwaCard key={manhwa.id} manhwa={manhwa} href={ROUTES.manhwa(manhwa.id)}>
                 <AddToLibraryButton manhwaId={manhwa.id} inLibrary={libraryIds.has(manhwa.id)} />
               </ManhwaCard>
             ))}
           </ManhwaGrid>
           {!external && (
             <Button variant="link" asChild className="px-0">
-              <Link href={`/catalogue?${externalParams}`} replace scroll={false}>
+              <Link href={`${ROUTES.catalog}?${externalParams}`} replace scroll={false}>
                 <Globe data-icon="inline-start" />
                 Pas ce que vous cherchez ? Chercher aussi sur AniList, MangaDex et Kitsu
                 <ArrowRight data-icon="inline-end" />
@@ -108,11 +110,11 @@ export async function SearchResults({ q, external }: SearchResultsProps) {
                   key={`${hit.provider}:${hit.externalId}`}
                   manhwa={hit}
                   label={PROVIDER_LABELS[hit.provider]}
-                  href={hit.importedManhwaId ? `/manhwas/${hit.importedManhwaId}` : undefined}
+                  href={hit.importedManhwaId ? ROUTES.manhwa(hit.importedManhwaId) : undefined}
                 >
                   {hit.importedManhwaId ? (
-                    <Button variant="secondary" asChild>
-                      <Link href={`/manhwas/${hit.importedManhwaId}`}>
+                    <Button variant="secondary" asChild className={CARD_ACTION_CLASS}>
+                      <Link href={ROUTES.manhwa(hit.importedManhwaId)}>
                         Voir la fiche
                         <ArrowRight data-icon="inline-end" />
                       </Link>

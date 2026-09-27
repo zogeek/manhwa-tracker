@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { LibraryItem } from "./library-tabs";
 import { LibraryTabs } from "./library-tabs";
 
-vi.mock("next/navigation", () => ({ usePathname: () => "/bibliotheque" }));
+vi.mock("next/navigation", () => ({ usePathname: () => "/library" }));
 
 const item = (key: string, status: LibraryItem["status"]): LibraryItem => ({
   key,
@@ -36,10 +36,10 @@ describe("LibraryTabs", () => {
 
     await userEvent.click(screen.getByRole("tab", { name: "En pause, 1 série" }));
     expect(cards()).toEqual(["Omniscient Reader"]);
-    expect(window.history.replaceState).toHaveBeenLastCalledWith(null, "", "/bibliotheque?statut=on_hold");
+    expect(window.history.replaceState).toHaveBeenLastCalledWith(null, "", "/library?statut=on_hold");
 
     await userEvent.click(screen.getByRole("tab", { name: "Toutes, 3 séries" }));
-    expect(window.history.replaceState).toHaveBeenLastCalledWith(null, "", "/bibliotheque");
+    expect(window.history.replaceState).toHaveBeenLastCalledWith(null, "", "/library");
   });
 
   it("opens the tab requested by the URL and explains an empty status", () => {

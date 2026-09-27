@@ -14,6 +14,7 @@ import { verifySession } from "@/app/lib/dal";
 import { formatDate } from "@/app/lib/format";
 import { MANHWA_TYPE_LABELS, PUBLICATION_STATUS_LABELS } from "@/app/lib/labels";
 import { getManhwa } from "@/app/lib/queries";
+import { ROUTES } from "@/app/lib/routes";
 
 type ManhwaPageProps = { params: Promise<{ id: string }> };
 
@@ -36,7 +37,7 @@ export default async function ManhwaPage({ params }: ManhwaPageProps) {
   return (
     <>
       <Button variant="ghost" size="sm" asChild className="self-start">
-        <Link href="/catalogue">
+        <Link href={ROUTES.catalog}>
           <ArrowLeft data-icon="inline-start" />
           Catalogue
         </Link>

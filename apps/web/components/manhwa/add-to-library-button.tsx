@@ -3,6 +3,7 @@
 import { useOptimistic } from "react";
 import { BookmarkCheck, BookmarkPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { CARD_ACTION_CLASS } from "@/components/manhwa/card-action";
 import { api } from "@/app/lib/api";
 import { useApiMutation } from "@/hooks/use-api-mutation";
 
@@ -26,7 +27,7 @@ export function AddToLibraryButton({ manhwaId, inLibrary }: AddToLibraryButtonPr
 
   if (optimisticInLibrary) {
     return (
-      <Button variant="secondary" disabled aria-busy={isPending}>
+      <Button variant="secondary" disabled aria-busy={isPending} className={CARD_ACTION_CLASS}>
         <BookmarkCheck data-icon="inline-start" />
         Dans ma bibliothèque
       </Button>
@@ -35,7 +36,7 @@ export function AddToLibraryButton({ manhwaId, inLibrary }: AddToLibraryButtonPr
 
   return (
     <>
-      <Button onClick={addToLibrary} disabled={isPending}>
+      <Button onClick={addToLibrary} disabled={isPending} className={CARD_ACTION_CLASS}>
         <BookmarkPlus data-icon="inline-start" />
         Ajouter à ma bibliothèque
       </Button>

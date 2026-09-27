@@ -1,18 +1,26 @@
 import { and, eq, isNull } from 'drizzle-orm';
 import type { DbClient } from '../../shared/db/index.js';
-import { manhwas, sources } from '../../shared/db/schema.js';
+import { externalLinks, manhwas, sources } from '../../shared/db/schema.js';
 import type { TransactionRunner } from '../../shared/db/transaction.js';
 import { firstOrNull } from '../../shared/db/utils.js';
 import { NotFoundError } from '../../shared/lib/errors.js';
 import type { IngestionRepository } from '../ingestion/ingestion.repository.js';
-import { PermanentJobError, type JobHandler, type JobPayloads } from '../jobs/job.types.js';
-import type { ExternalChapterFeed, ExternalProvider, ExternalSource } from './external-catalog.js';
+import type { JobHandler, JobPayloads } from '../jobs/job.types.js';
+import {
+  isExternalProvider,
+  type ExternalChapterFeed,
+  type ExternalProvider,
+  type ExternalRef,
+  type ExternalSource,
+} from './external-catalog.js';
 
 /** Auteur technique des lignes créées par les tâches de fond (colonnes d'audit). */
 export const JOBS_ACTOR = 'system:jobs';
 
 export interface ChapterSyncRepository {
   isManhwaActive(manhwaId: string): Promise<boolean>;
+  /** Références externes de l'œuvre (`external_links`), limitées aux fournisseurs connus du code. */
+  findExternalRefs(manhwaId: string): Promise<Pick<ExternalRef, 'provider' | 'externalId'>[]>;
   /** Id de la source active correspondant au fournisseur (créée au premier passage). */
   ensureSource(source: ExternalSource): Promise<string>;
 }
@@ -33,6 +41,15 @@ export class DrizzleChapterSyncRepository implements ChapterSyncRepository {
       .where(and(eq(manhwas.id, manhwaId), isNull(manhwas.deletedAt)))
       .limit(1);
     return rows.length > 0;
+  }
+
+  async findExternalRefs(manhwaId: string): Promise<Pick<ExternalRef, 'provider' | 'externalId'>[]> {
+    const rows = await this.db
+      .select({ provider: externalLinks.provider, externalId: externalLinks.externalId })
+      .from(externalLinks)
+      .where(eq(externalLinks.manhwaId, manhwaId));
+    // `provider` est un texte libre en base : on écarte ce que le code ne connaît pas (ex. 'mal').
+    return rows.flatMap(({ provider, externalId }) => (isExternalProvider(provider) ? [{ provider, externalId }] : []));
   }
 
   async ensureSource({ name, baseUrl, language }: ExternalSource): Promise<string> {
@@ -66,12 +83,19 @@ export class DrizzleChapterSyncRepository implements ChapterSyncRepository {
 
 export type ChapterSyncStats = { chapters: number; chaptersCreated: number; releasesCreated: number };
 
-export type ChapterSyncLogger = Pick<Console, 'info'>;
+export type ChapterSyncLogger = Pick<Console, 'info' | 'warn'>;
+
+type SyncTarget = { feed: ExternalChapterFeed; externalId: string };
 
 /**
- * Tâche `chapters.sync` : lit le flux de chapitres d'un fournisseur et l'upserte en base
- * (chapitres canoniques + parutions par langue/équipe). Rejouable sans doublon.
- * L'appel réseau précède la transaction : pas de connexion Postgres tenue pendant la pagination.
+ * Tâche `chapters.sync`, agnostique du fournisseur : elle ne reçoit que l'œuvre, lit ses liens
+ * externes (`external_links`) et délègue à CHAQUE fournisseur lié qui sait lister des chapitres
+ * (port `ExternalChapterFeed`). Aucun fournisseur n'est privilégié ni codé en dur.
+ *
+ * - Aucun lien vers un fournisseur à chapitres : la tâche se termine sans erreur. Les chapitres
+ *   arriveront par l'ingestion du scraper (`/api/ingest`), ou d'un flux lié plus tard.
+ * - Plusieurs flux : chacun alimente sa propre source ; l'échec de l'un n'empêche pas les autres.
+ * - Rejouable sans doublon (upserts idempotents), l'appel réseau précède chaque transaction.
  */
 export class ChapterSyncJob implements JobHandler<'chapters.sync'> {
   readonly type: 'chapters.sync' = 'chapters.sync';
@@ -86,16 +110,48 @@ export class ChapterSyncJob implements JobHandler<'chapters.sync'> {
     this.feeds = new Map(feeds.map((feed) => [feed.name, feed]));
   }
 
-  async handle({ manhwaId, provider, externalId }: JobPayloads['chapters.sync']): Promise<void> {
-    const feed = this.feeds.get(provider);
-    if (!feed) throw new PermanentJobError(`No chapter feed enabled for ${provider}`);
+  async handle({ manhwaId }: JobPayloads['chapters.sync']): Promise<void> {
     // Retirée du catalogue entre la mise en file et l'exécution : plus rien à synchroniser.
     if (!(await this.repo.isManhwaActive(manhwaId))) return;
 
-    const chapters = await feed.listChapters(externalId).catch((error: unknown) => {
-      if (error instanceof NotFoundError) throw new PermanentJobError(error.message, { cause: error });
-      throw error;
+    const targets = (await this.repo.findExternalRefs(manhwaId)).flatMap(({ provider, externalId }): SyncTarget[] => {
+      const feed = this.feeds.get(provider);
+      return feed ? [{ feed, externalId }] : [];
     });
+    if (targets.length === 0) {
+      this.logger.info(`[JOBS] chapters.sync ${manhwaId}: no linked chapter feed, waiting for the scraper`);
+      return;
+    }
+
+    const failures: { provider: ExternalProvider; error: unknown }[] = [];
+    for (const target of targets) {
+      try {
+        await this.syncFrom(manhwaId, target);
+      } catch (error) {
+        // L'œuvre n'existe plus chez ce fournisseur : ré-essayer ne changera rien, on passe au suivant.
+        if (error instanceof NotFoundError) {
+          this.logger.warn(`[JOBS] chapters.sync ${target.feed.name}:${target.externalId} skipped: ${error.message}`);
+          continue;
+        }
+        failures.push({ provider: target.feed.name, error });
+      }
+    }
+
+    // Échec transitoire (réseau, quota…) : la tâche entière est rejouée plus tard. Les flux déjà
+    // synchronisés le seront à nouveau sans effet (upserts idempotents).
+    // Le détail de chaque fournisseur reste lisible dans `jobs.last_error` (diagnostic sans fouiller les logs).
+    if (failures.length > 0) {
+      const details = failures
+        .map(({ provider, error }) => `${provider}: ${error instanceof Error ? error.message : String(error)}`)
+        .join('; ');
+      throw new Error(`${failures.length}/${targets.length} chapter feed(s) failed — ${details}`, {
+        cause: failures[0]?.error,
+      });
+    }
+  }
+
+  private async syncFrom(manhwaId: string, { feed, externalId }: SyncTarget): Promise<void> {
+    const chapters = await feed.listChapters(externalId);
 
     const stats = await this.transactions.run(async ({ sync, ingestion }): Promise<ChapterSyncStats> => {
       const sourceId = await sync.ensureSource(feed.source);
@@ -143,7 +199,7 @@ export class ChapterSyncJob implements JobHandler<'chapters.sync'> {
     });
 
     this.logger.info(
-      `[JOBS] chapters.sync ${provider}:${externalId} → ${stats.chapters} chapters ` +
+      `[JOBS] chapters.sync ${feed.name}:${externalId} → ${stats.chapters} chapters ` +
         `(${stats.chaptersCreated} new, ${stats.releasesCreated} new releases)`,
     );
   }

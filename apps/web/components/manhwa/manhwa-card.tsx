@@ -34,7 +34,8 @@ export function ManhwaCard({ manhwa, href, label, children }: ManhwaCardProps) {
   const cover = coverSrc(manhwa.coverUrl);
 
   return (
-    <Card className="group gap-3 pt-0">
+    // `min-w-0` : une cellule de grille ne s'élargit pas au-delà de sa colonne à cause de son contenu.
+    <Card className="group min-w-0 gap-3 pt-0">
       <MaybeLink href={href} className="bg-muted relative block aspect-[2/3] overflow-hidden">
         {cover ? (
           // `unoptimized` : l'image est déjà servie (et mise en cache) par le proxy d'images de l'API.

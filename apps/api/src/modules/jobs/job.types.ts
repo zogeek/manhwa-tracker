@@ -1,7 +1,6 @@
 import type { InferSelectModel } from 'drizzle-orm';
 import { z } from 'zod';
 import type { jobs } from '../../shared/db/schema.js';
-import { EXTERNAL_PROVIDERS } from '../discovery/external-catalog.js';
 
 export type Job = InferSelectModel<typeof jobs>;
 
@@ -14,11 +13,13 @@ export const JOB_PAYLOAD_SCHEMAS = {
     manhwaId: z.uuid(),
     imageUrl: z.url({ protocol: /^https$/ }),
   }),
-  /** Synchronisation des chapitres d'une œuvre depuis le flux d'un fournisseur externe. */
+  /**
+   * Synchronisation des chapitres d'une œuvre. Le payload ne désigne QUE l'œuvre : c'est le handler
+   * qui choisit les sources à partir de ses liens externes (agnostique du fournisseur).
+   * (Les anciennes tâches `{ manhwaId, provider, externalId }` restent valides : Zod ignore les clés en trop.)
+   */
   'chapters.sync': z.object({
     manhwaId: z.uuid(),
-    provider: z.enum(EXTERNAL_PROVIDERS),
-    externalId: z.string().min(1).max(64),
   }),
 };
 
