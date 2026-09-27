@@ -3,7 +3,10 @@ from typing import ClassVar
 from uuid import UUID
 
 import pytest
+from selectolax.lexbor import LexborHTMLParser
 
+from manhwa_scraper.contract import IngestManhwa, RunOutcome
+from manhwa_scraper.extractors import UnsupportedSeriesError
 from manhwa_scraper.extractors.themes import MadaraExtractor
 from manhwa_scraper.fetching import FetchError
 from manhwa_scraper.ingest_client import IngestClient, create_http_client
@@ -88,9 +91,28 @@ async def test_a_failing_series_makes_the_run_partial(
         "series_found": 2,
         "series_scraped": 1,
         "series_failed": 1,
+        "series_skipped": 0,
         "chapters_sent": 2,
         "batches_sent": 1,
     }
+
+
+async def test_an_unsupported_series_is_skipped_without_degrading_the_run(
+    api: FakeIngestApi, fetcher: FakeFetcher, ingest: IngestClient
+) -> None:
+    class SkipsSolo(DemoMadara):
+        def parse_series(self, document: LexborHTMLParser, series_url: str) -> IngestManhwa:
+            if series_url == SOLO:
+                raise UnsupportedSeriesError("roman")
+            return super().parse_series(document, series_url)
+
+    fetcher.add(SOLO, fixture("madara_series_ajax.html"))
+
+    report = await ScrapeRunner(SkipsSolo(fetcher), ingest, source_id=SOURCE_ID, worker_version="test").run()
+
+    assert report.outcome == RunOutcome.succeeded
+    assert (report.stats.series_scraped, report.stats.series_skipped, report.stats.series_failed) == (1, 1, 0)
+    assert len(api.bodies("POST", "/api/ingest/batches")[0]["manhwas"]) == 1
 
 
 async def test_an_anti_bot_block_stops_the_run_and_flags_the_source(
