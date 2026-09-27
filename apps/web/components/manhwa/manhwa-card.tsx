@@ -1,14 +1,18 @@
-import Image from "next/image";
 import Link from "next/link";
-import { ImageOff } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import type { CatalogManhwa } from "@/app/lib/api-types";
-import { coverSrc } from "@/app/lib/cover";
+import type { CatalogManhwa, ManhwaAuthor } from "@/app/lib/api-types";
+import { coverSources } from "@/app/lib/cover";
 import { MANHWA_TYPE_LABELS, PUBLICATION_STATUS_LABELS } from "@/app/lib/labels";
+import { AuthorLine } from "./author-list";
+import { CoverImage } from "./cover-image";
 
 type ManhwaCardProps = {
-  manhwa: Pick<CatalogManhwa, "title" | "coverUrl" | "type" | "status" | "totalChapters">;
+  manhwa: Pick<CatalogManhwa, "title" | "coverUrl" | "type" | "status" | "totalChapters"> & {
+    /** Copie locale de la couverture (fiches du catalogue) ; absente pour un résultat externe. */
+    localCoverUrl?: string | null;
+    authors?: readonly ManhwaAuthor[];
+  };
   /** Lien vers la fiche détaillée (couverture et titre deviennent cliquables). */
   href?: string;
   /** Étiquette en haut à droite de la couverture (ex. fournisseur d'un résultat externe). */
@@ -31,28 +35,16 @@ function MaybeLink({ href, className, children }: { href?: string; className?: s
 // Composant de présentation pur (sans état) : utilisable depuis un Server Component
 // comme depuis un Client Component. L'interactivité est injectée via `children`.
 export function ManhwaCard({ manhwa, href, label, children }: ManhwaCardProps) {
-  const cover = coverSrc(manhwa.coverUrl);
-
   return (
     // `min-w-0` : une cellule de grille ne s'élargit pas au-delà de sa colonne à cause de son contenu.
     <Card className="group min-w-0 gap-3 pt-0">
       <MaybeLink href={href} className="bg-muted relative block aspect-[2/3] overflow-hidden">
-        {cover ? (
-          // `unoptimized` : l'image est déjà servie (et mise en cache) par le proxy d'images de l'API.
-          <Image
-            src={cover}
-            alt={`Couverture de ${manhwa.title}`}
-            fill
-            unoptimized
-            sizes="(min-width: 1280px) 20vw, (min-width: 768px) 25vw, 50vw"
-            className="object-cover transition-transform duration-300 group-hover:scale-105"
-          />
-        ) : (
-          <div className="text-muted-foreground flex size-full flex-col items-center justify-center gap-2">
-            <ImageOff className="size-8" aria-hidden />
-            <span className="text-xs">Pas de couverture</span>
-          </div>
-        )}
+        <CoverImage
+          sources={coverSources(manhwa)}
+          alt={`Couverture de ${manhwa.title}`}
+          sizes="(min-width: 1280px) 20vw, (min-width: 768px) 25vw, 50vw"
+          className="object-cover transition-transform duration-300 group-hover:scale-105"
+        />
         <Badge className="absolute top-2 left-2 shadow-sm">{MANHWA_TYPE_LABELS[manhwa.type]}</Badge>
         {label && (
           <Badge variant="secondary" className="absolute top-2 right-2 shadow-sm">
@@ -61,12 +53,13 @@ export function ManhwaCard({ manhwa, href, label, children }: ManhwaCardProps) {
         )}
       </MaybeLink>
 
-      <CardHeader className="gap-2">
+      <CardHeader className="gap-1">
         <CardTitle className="line-clamp-2 leading-snug" title={manhwa.title}>
           <MaybeLink href={href} className="hover:underline">
             {manhwa.title}
           </MaybeLink>
         </CardTitle>
+        <AuthorLine authors={manhwa.authors ?? []} />
       </CardHeader>
 
       <CardContent className="flex flex-wrap gap-1.5">

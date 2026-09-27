@@ -38,3 +38,7 @@ export type Chapter = InferResponseType<(typeof api.chapters.manhwa)[":manhwaId"
 
 /** Progression de l'utilisateur sur une œuvre, `null` si elle n'est pas dans sa bibliothèque. */
 export type ReadingProgress = InferResponseType<(typeof api.reading.progress)[":manhwaId"]["$get"], 200>["data"];
+
+/** Auteur d'une fiche (nom + rôle), dans l'ordre du catalogue d'origine. */
+export type ManhwaAuthor = CatalogManhwa["authors"][number];
+export type AuthorRole = ManhwaAuthor["role"];

@@ -1,4 +1,4 @@
-import type { ManhwaType, PublicationStatus, ReadingStatus } from "./api-types";
+import type { AuthorRole, ManhwaType, PublicationStatus, ReadingStatus } from "./api-types";
 
 // Records exhaustifs : une valeur ajoutée à un enum Postgres casse le typecheck tant qu'elle n'a pas de libellé.
 
@@ -32,3 +32,12 @@ export const READING_STATUSES: readonly ReadingStatus[] = [
   "completed",
   "dropped",
 ];
+
+export const AUTHOR_ROLE_LABELS: Record<AuthorRole, string> = {
+  both: "Scénario & dessin",
+  story: "Scénario",
+  art: "Dessin",
+};
+
+/** Ordre d'affichage des rôles sur la fiche : auteur complet d'abord. */
+export const AUTHOR_ROLES: readonly AuthorRole[] = ["both", "story", "art"];
