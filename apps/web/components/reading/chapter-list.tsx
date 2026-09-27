@@ -5,9 +5,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { formatChapter, formatDate } from "@/app/lib/format";
 import { getChapters, getProgress } from "@/app/lib/queries";
 import { ChapterActions } from "./chapter-actions";
+import { ChapterReleases } from "./chapter-releases";
 import { MarkReadButton } from "./mark-read-button";
 
-/** Liste des chapitres connus (du plus récent au plus ancien), avec l'état « lu » de l'utilisateur. */
+/** Liste des chapitres connus (du plus récent au plus ancien), leurs teams de traduction et l'état « lu » de l'utilisateur. */
 export async function ChapterList({ manhwaId }: { manhwaId: string }) {
   // `getProgress` est mémoïsé : le panneau de lecture de la même page ne refait pas l'appel.
   const [chapters, progress] = await Promise.all([getChapters(manhwaId), getProgress(manhwaId)]);
@@ -36,10 +37,15 @@ export async function ChapterList({ manhwaId }: { manhwaId: string }) {
               const read = chapter.number <= readUpTo;
               return (
                 <li key={chapter.id} className="flex items-center gap-3 px-3 py-2 text-sm">
-                  <span className={read ? "text-muted-foreground" : "font-medium"}>
-                    Chapitre {formatChapter(chapter.number)}
-                  </span>
-                  {chapter.title && <span className="text-muted-foreground min-w-0 truncate">{chapter.title}</span>}
+                  <div className="flex min-w-0 flex-col gap-0.5">
+                    <div className="flex min-w-0 items-baseline gap-3">
+                      <span className={read ? "text-muted-foreground shrink-0" : "shrink-0 font-medium"}>
+                        Chapitre {formatChapter(chapter.number)}
+                      </span>
+                      {chapter.title && <span className="text-muted-foreground min-w-0 truncate">{chapter.title}</span>}
+                    </div>
+                    <ChapterReleases releases={chapter.releases} />
+                  </div>
                   <span className="ml-auto flex shrink-0 items-center gap-2">
                     {chapter.releaseDate && (
                       <time className="text-muted-foreground hidden text-xs sm:inline" dateTime={chapter.releaseDate}>
