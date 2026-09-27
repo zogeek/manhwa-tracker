@@ -29,7 +29,13 @@ class MadaraSelectors:
     info_value: str = ".summary-content"
     chapter_item: str = "li.wp-manga-chapter"
     chapter_link: str = "a"
+    chapter_label: str | None = None
+    """Libellé (« Chapitre 12 - Titre ») ; `None` = texte du lien."""
+    chapter_number_attr: str | None = None
+    """Attribut de `chapter_item` portant le numéro (ex. `data-num`), plus fiable que le libellé."""
     chapter_date: str = ".chapter-release-date"
+    chapter_date_attr: str | None = None
+    """Attribut de `chapter_date` portant la date complète quand le texte est abrégé (ex. `title`)."""
 
 
 class MadaraExtractor(SourceExtractor, ABC):
@@ -52,7 +58,7 @@ class MadaraExtractor(SourceExtractor, ABC):
         title = clean_text(document.css_first(self.selectors.title))
         if title is None:
             raise ExtractionError(f"Titre introuvable ({self.selectors.title}) sur {series_url}")
-        info = self._info_table(document)
+        info = self.parse_info_table(document)
         return IngestManhwa(
             source_manhwa_url=series_url,
             title=title,
@@ -76,27 +82,33 @@ class MadaraExtractor(SourceExtractor, ABC):
 
     def parse_chapters(self, document: LexborHTMLParser, series_url: str) -> list[IngestChapter]:
         chapters: list[IngestChapter] = []
-        for item in document.css(self.selectors.chapter_item):
-            link = item.css_first(self.selectors.chapter_link)
+        selectors = self.selectors
+        for item in document.css(selectors.chapter_item):
+            link = item.css_first(selectors.chapter_link)
             href = link.attributes.get("href") if link is not None else None
-            label = clean_text(link)
-            number = parse_chapter_number(label) if label else None
+            label = clean_text(item.css_first(selectors.chapter_label) if selectors.chapter_label else link)
+            raw_number = item.attributes.get(selectors.chapter_number_attr) if selectors.chapter_number_attr else None
+            number = parse_chapter_number(raw_number or label or "")
             if not href or label is None or number is None:
                 logger.debug("Chapitre ignoré (lien ou numéro absent) sur %s : %r", series_url, label)
                 continue
+            date_node = item.css_first(selectors.chapter_date)
             chapters.append(
                 IngestChapter(
                     number=number,
                     url=absolute_url(series_url, href),
                     language=self.language,
                     title=_chapter_title(label),
-                    published_at=parse_date(_release_date_label(item.css_first(self.selectors.chapter_date))),
+                    published_at=parse_date(_release_date_label(date_node, selectors.chapter_date_attr)),
                 )
             )
         return chapters
 
-    def _info_table(self, document: LexborHTMLParser) -> dict[str, str]:
-        """Bloc « Statut / Type / Genres… » de la fiche, sous forme `libellé en minuscules → valeur`."""
+    def parse_info_table(self, document: LexborHTMLParser) -> dict[str, str]:
+        """Bloc « Statut / Type… » de la fiche, sous forme `libellé en minuscules → valeur`.
+
+        Point d'extension : un thème enfant qui présente ces infos autrement (ex. `<dl>`) le surcharge.
+        """
         info: dict[str, str] = {}
         for item in document.css(self.selectors.info_item):
             label = clean_text(item.css_first(self.selectors.info_label))
@@ -121,10 +133,12 @@ def _chapter_title(label: str) -> str | None:
     return None
 
 
-def _release_date_label(node: LexborNode | None) -> str | None:
+def _release_date_label(node: LexborNode | None, attr: str | None) -> str | None:
     """Les chapitres récents affichent un badge « NEW » : la date relative est alors dans `title`."""
     if node is None:
         return None
+    if attr is not None and (value := node.attributes.get(attr)):
+        return value
     text = clean_text(node)
     if text:
         return text
