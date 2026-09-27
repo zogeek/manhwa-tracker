@@ -1,6 +1,6 @@
 import { NotFoundError } from '../../shared/lib/errors.js';
 import type { ChapterRepository } from './chapter.repository.js';
-import type { Chapter } from './chapter.schema.js';
+import type { Chapter, ChapterWithReleases } from './chapter.schema.js';
 import type { CreateChapterInput, UpdateChapterInput } from './chapter.validator.js';
 
 export class ChapterService {
@@ -10,7 +10,7 @@ export class ChapterService {
     return this.repo.findAll();
   }
 
-  async getByManhwaId(manhwaId: Chapter['manhwaId']): Promise<Chapter[]> {
+  async getByManhwaId(manhwaId: Chapter['manhwaId']): Promise<ChapterWithReleases[]> {
     return this.repo.findByManhwaId(manhwaId);
   }
 

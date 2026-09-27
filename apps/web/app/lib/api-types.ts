@@ -42,3 +42,7 @@ export type ReadingProgress = InferResponseType<(typeof api.reading.progress)[":
 /** Auteur d'une fiche (nom + rôle), dans l'ordre du catalogue d'origine. */
 export type ManhwaAuthor = CatalogManhwa["authors"][number];
 export type AuthorRole = ManhwaAuthor["role"];
+
+/** Parution d'un chapitre (source, langue, URL) avec les teams créditées, dans l'ordre de crédit. */
+export type ChapterRelease = Chapter["releases"][number];
+export type ReleaseTeam = ChapterRelease["teams"][number];
