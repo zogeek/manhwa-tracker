@@ -126,21 +126,25 @@ export class IngestionService {
       const chapter = await ingestion.upsertChapter(manhwaId, chapterItem);
       if (chapter.created) result.chaptersCreated += 1;
 
-      const scanlationGroupId = chapterItem.scanlationGroup
-        ? await ingestion.upsertScanlationGroup(chapterItem.scanlationGroup)
-        : null;
-
-      const releaseCreated = await ingestion.upsertRelease({
+      const release = await ingestion.upsertRelease({
         chapterId: chapter.id,
         sourceId,
-        scanlationGroupId,
         url: chapterItem.url,
         language: chapterItem.language,
         quality: chapterItem.quality,
         publishedAt: chapterItem.publishedAt ?? null,
       });
-      if (releaseCreated) result.releasesCreated += 1;
+      if (release.created) result.releasesCreated += 1;
       else result.releasesUpdated += 1;
+
+      // Teams créditées (le scraper ne connaît que leur nom : rapprochement par nom normalisé).
+      const teamNames = [...(chapterItem.scanlationGroups ?? []), ...(chapterItem.scanlationGroup ? [chapterItem.scanlationGroup] : [])];
+      const teamIds: string[] = [];
+      for (const name of teamNames) {
+        const id = await ingestion.upsertTeam({ name, websiteUrl: null, provider: null, externalId: null });
+        if (id) teamIds.push(id);
+      }
+      await ingestion.setReleaseTeams(release.id, teamIds);
 
       latestChapter = Math.max(latestChapter ?? 0, chapterItem.number);
     }

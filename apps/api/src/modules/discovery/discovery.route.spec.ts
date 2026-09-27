@@ -2,6 +2,7 @@ import { and, eq } from 'drizzle-orm';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   authors,
+  chapterReleaseGroups,
   chapterReleases,
   chapters,
   externalLinks,
@@ -12,6 +13,7 @@ import {
   manhwaTerms,
   manhwaTitles,
   manhwas as manhwasTable,
+  scanlationGroups,
   sources,
   termAliases,
   terms,
@@ -610,5 +612,39 @@ describe('local covers — served by the API once mirrored', () => {
     const { data: detail } = await (await manhwas[':id'].$get({ param: { id: imported.id } })).json();
     expect(detail.localCoverUrl).toBeNull();
     expect(detail.coverUrl).toBe('https://s4.anilist.co/file/new-cover.png');
+  });
+});
+
+describe('scanlation teams synced from MangaDex', () => {
+  it('credits each release to its teams, with their MangaDex identity, and replays without duplicates', async () => {
+    const { data: manhwa } = await (await importTbateFromMangaDex(reader)).json();
+    await context.worker.runOnce();
+
+    const teams = await context.db.select().from(scanlationGroups);
+    expect(teams.map((team) => `${team.name}|${team.provider}`).sort()).toEqual([
+      'Scan FR|mangadex',
+      'Tapas Official|mangadex',
+    ]);
+    expect(teams.every((team) => /^[0-9a-f-]{36}$/.test(team.externalId ?? ''))).toBe(true);
+
+    const credits = await context.db
+      .select({ language: chapterReleases.language, team: scanlationGroups.name })
+      .from(chapterReleaseGroups)
+      .innerJoin(chapterReleases, eq(chapterReleases.id, chapterReleaseGroups.releaseId))
+      .innerJoin(chapters, eq(chapters.id, chapterReleases.chapterId))
+      .innerJoin(scanlationGroups, eq(scanlationGroups.id, chapterReleaseGroups.groupId))
+      .where(eq(chapters.manhwaId, manhwa.id));
+    // Chapitre 1 en anglais (Tapas Official) ET en français (Scan FR) : deux parutions, deux teams.
+    expect(credits.map((credit) => `${credit.language}:${credit.team}`).sort()).toEqual([
+      'en:Tapas Official',
+      'en:Tapas Official',
+      'fr:Scan FR',
+    ]);
+
+    // Nouvelle synchronisation (nouveau chapitre publié…) : aucune team ni crédit en double.
+    await context.db.update(jobs).set({ status: 'pending', runAt: new Date(0) });
+    await context.worker.runOnce();
+    expect(await context.db.select().from(scanlationGroups)).toHaveLength(2);
+    expect(await context.db.select().from(chapterReleaseGroups)).toHaveLength(3);
   });
 });

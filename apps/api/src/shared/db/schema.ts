@@ -363,13 +363,24 @@ export const chapters = pgTable('chapters', {
 
 export const scanlationGroups = pgTable('scanlation_groups', {
   id: uuid('id').defaultRandom().primaryKey(),
-  slug: text('slug').notNull(),
+  slug: text('slug').notNull(), // nom normalisé : clé de rapprochement quand aucun identifiant n'est connu (scraper)
   name: text('name').notNull(),
   websiteUrl: text('website_url'),
+  // Identité chez le fournisseur qui a fait connaître la team (ex. UUID du groupe MangaDex) :
+  // plus fiable que le nom, qui peut changer (« Asura Scans » → « Asura Comics »).
+  provider: text('provider'),
+  externalId: text('external_id'),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 }, (table) => [
   uniqueIndex('scanlation_groups_slug_idx').on(table.slug),
+  uniqueIndex('scanlation_groups_provider_external_id_idx')
+    .on(table.provider, table.externalId)
+    .where(sql`${table.externalId} IS NOT NULL`),
+  check(
+    'scanlation_groups_external_id_has_provider',
+    sql`(${table.provider} IS NULL) = (${table.externalId} IS NULL)`,
+  ),
 ]);
 
 // ============================================================
@@ -388,8 +399,6 @@ export const chapterReleases = pgTable('chapter_releases', {
   sourceId: uuid('source_id')
     .notNull()
     .references(() => sources.id, { onDelete: 'cascade' }),
-  scanlationGroupId: uuid('scanlation_group_id')
-    .references(() => scanlationGroups.id, { onDelete: 'set null' }),
   url: text('url').notNull(),
   language: text('language').default('fr').notNull(),
   quality: chapterQualityEnum('quality').default('hd').notNull(),
@@ -400,7 +409,24 @@ export const chapterReleases = pgTable('chapter_releases', {
 }, (table) => [
   uniqueIndex('chapter_releases_source_url_idx').on(table.sourceId, table.url),
   index('chapter_releases_chapter_id_idx').on(table.chapterId),
-  index('chapter_releases_scanlation_group_id_idx').on(table.scanlationGroupId),
+]);
+
+// Pivot : une parution peut être le fruit d'une collaboration entre plusieurs teams
+// (MangaDex liste alors plusieurs `scanlation_group` sur le même chapitre).
+export const chapterReleaseGroups = pgTable('chapter_release_groups', {
+  releaseId: uuid('release_id')
+    .notNull()
+    .references(() => chapterReleases.id, { onDelete: 'cascade' }),
+  groupId: uuid('group_id')
+    .notNull()
+    .references(() => scanlationGroups.id, { onDelete: 'cascade' }),
+  // Ordre de crédit tel que donné par la source (0 = team principale).
+  position: smallint('position').default(0).notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.releaseId, table.groupId] }),
+  // Index non couvert par la clé primaire : « toutes les parutions d'Asura Scans » + cascade depuis scanlation_groups.
+  index('chapter_release_groups_group_id_idx').on(table.groupId),
+  check('chapter_release_groups_position_positive', sql`${table.position} >= 0`),
 ]);
 
 // ============================================================
@@ -787,10 +813,21 @@ export const chaptersRelations = relations(chapters, ({ one, many }) => ({
 }));
 
 export const scanlationGroupsRelations = relations(scanlationGroups, ({ many }) => ({
-  releases: many(chapterReleases),
+  releases: many(chapterReleaseGroups),
 }));
 
-export const chapterReleasesRelations = relations(chapterReleases, ({ one }) => ({
+export const chapterReleaseGroupsRelations = relations(chapterReleaseGroups, ({ one }) => ({
+  release: one(chapterReleases, {
+    fields: [chapterReleaseGroups.releaseId],
+    references: [chapterReleases.id],
+  }),
+  group: one(scanlationGroups, {
+    fields: [chapterReleaseGroups.groupId],
+    references: [scanlationGroups.id],
+  }),
+}));
+
+export const chapterReleasesRelations = relations(chapterReleases, ({ one, many }) => ({
   chapter: one(chapters, {
     fields: [chapterReleases.chapterId],
     references: [chapters.id],
@@ -799,10 +836,7 @@ export const chapterReleasesRelations = relations(chapterReleases, ({ one }) => 
     fields: [chapterReleases.sourceId],
     references: [sources.id],
   }),
-  scanlationGroup: one(scanlationGroups, {
-    fields: [chapterReleases.scanlationGroupId],
-    references: [scanlationGroups.id],
-  }),
+  groups: many(chapterReleaseGroups),
 }));
 
 export const scrapeRunsRelations = relations(scrapeRuns, ({ one, many }) => ({

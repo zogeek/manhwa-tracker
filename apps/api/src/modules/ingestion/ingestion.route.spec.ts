@@ -3,6 +3,7 @@ import { and, eq } from 'drizzle-orm';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import {
+  chapterReleaseGroups,
   chapterReleases,
   chapters,
   ingestionBatches,
@@ -113,8 +114,39 @@ describe('POST /api/ingest/batches', () => {
 
     const [link] = await context.db.select().from(manhwaSources).where(eq(manhwaSources.manhwaId, catalog.manhwa.id));
     expect(link).toMatchObject({ manhwaUrl: SERIES_URL, latestChapter: 4.5 });
-    expect(await context.db.select().from(scanlationGroups)).toEqual([
-      expect.objectContaining({ slug: 'asura-team', name: 'Asura Team' }),
+    const [asura] = await context.db.select().from(scanlationGroups);
+    expect(asura).toMatchObject({ slug: 'asura-team', name: 'Asura Team', provider: null, externalId: null });
+    // Chaque parution est créditée à la team (table de liaison).
+    const credits = await context.db.select().from(chapterReleaseGroups);
+    expect(credits).toHaveLength(3);
+    expect(credits.every((credit) => credit.groupId === asura?.id)).toBe(true);
+  });
+
+  it('credits collaborations and never duplicates a team across batches', async () => {
+    const collab = soloLevelingBatch(catalog.source.id, [6]);
+    const [manhwa] = collab.manhwas;
+    const [chapter] = manhwa?.chapters ?? [];
+    if (!chapter) throw new Error('chapter expected');
+    Object.assign(chapter, { scanlationGroup: undefined, scanlationGroups: ['Asura Team', 'Flame Comics'] });
+
+    expect((await ingest('/batches', soloLevelingBatch(catalog.source.id, [5]), { idempotencyKey: randomUUID() })).status).toBe(201);
+    expect((await ingest('/batches', collab, { idempotencyKey: randomUUID() })).status).toBe(201);
+
+    const names = (await context.db.select({ name: scanlationGroups.name }).from(scanlationGroups)).map((row) => row.name);
+    expect(names.sort()).toEqual(['Asura Team', 'Flame Comics']);
+    const [release] = await context.db
+      .select({ id: chapterReleases.id })
+      .from(chapterReleases)
+      .where(eq(chapterReleases.url, `${SERIES_URL}/chapter-6`));
+    const credits = await context.db
+      .select({ name: scanlationGroups.name, position: chapterReleaseGroups.position })
+      .from(chapterReleaseGroups)
+      .innerJoin(scanlationGroups, eq(scanlationGroups.id, chapterReleaseGroups.groupId))
+      .where(eq(chapterReleaseGroups.releaseId, release?.id ?? ''))
+      .orderBy(chapterReleaseGroups.position);
+    expect(credits).toEqual([
+      { name: 'Asura Team', position: 0 },
+      { name: 'Flame Comics', position: 1 },
     ]);
   });
 
