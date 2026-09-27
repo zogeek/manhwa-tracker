@@ -26,6 +26,7 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "datamodel-code-generator>=0.83.0",
     "mypy>=2.3.1",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
@@ -35,6 +36,8 @@ dev = [
 [tool.ruff]
 line-length = 120
 target-version = "py313"
+# Généré depuis le contrat Zod de l'API (`pnpm contract:generate`) : on ne le lint pas, on le régénère.
+extend-exclude = ["src/manhwa_scraper/contract.py"]
 
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "N", "UP", "B", "SIM", "ASYNC", "PT", "RUF", "C4", "PIE", "RET", "TC"]
@@ -60,3 +63,31 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 addopts = ["--strict-markers", "--strict-config"]
 filterwarnings = ["error"]
+
+# Modèles Pydantic générés depuis le JSON Schema exporté par l'API (source unique : les validateurs Zod).
+# `uv run datamodel-codegen` (ou `pnpm contract:generate` à la racine) lit cette section.
+[tool.datamodel-codegen]
+input = "../api/contracts/ingestion.schema.json"
+input-file-type = "jsonschema"
+output = "src/manhwa_scraper/contract.py"
+output-model-type = "pydantic_v2.BaseModel"
+base-class = "manhwa_scraper.contract_base.ContractModel"
+target-python-version = "3.13"
+use-annotated = true
+field-constraints = true
+snake-case-field = true
+use-standard-collections = true
+use-union-operator = true
+enum-field-as-literal = "none"
+use-subclass-enum = true
+use-type-alias = true
+collapse-root-models = true
+output-datetime-class = "AwareDatetime"
+use-double-quotes = true
+disable-timestamp = true
+strict-nullable = true
+formatters = ["ruff-format"]
+custom-file-header = """# FICHIER GÉNÉRÉ — ne pas éditer.
+# Source : validateurs Zod de apps/api/src/modules/ingestion/ingestion.validator.ts
+#   → apps/api/contracts/ingestion.schema.json → datamodel-codegen.
+# Régénérer : `pnpm contract:generate` à la racine du monorepo."""

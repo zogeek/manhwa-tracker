@@ -15,8 +15,8 @@ from urllib.parse import urlsplit
 
 from selectolax.lexbor import LexborHTMLParser
 
+from ..contract import IngestChapter, IngestManhwa
 from ..fetching import PageFetcher
-from ..models import ScrapedChapter, ScrapedManhwa, SeriesMetadata
 
 
 class ExtractionError(RuntimeError):
@@ -60,14 +60,15 @@ class SourceExtractor(ABC):
                 seen.add(url)
                 yield url
 
-    async def scrape_series(self, url: str) -> ScrapedManhwa:
+    async def scrape_series(self, url: str) -> IngestManhwa:
         result = await self._fetcher.fetch(url)
         document = LexborHTMLParser(result.html)
-        metadata = self.parse_series(document, result.url)
+        series = self.parse_series(document, result.url)
         chapters = await self.collect_chapters(document, result.url)
-        return ScrapedManhwa.assemble(metadata, chapters)
+        # Revalidation complète (et non `model_copy`) : la limite de 2 000 chapitres du contrat s'applique.
+        return IngestManhwa.model_validate({**series.model_dump(), "chapters": chapters})
 
-    async def collect_chapters(self, document: LexborHTMLParser, series_url: str) -> list[ScrapedChapter]:
+    async def collect_chapters(self, document: LexborHTMLParser, series_url: str) -> list[IngestChapter]:
         """Par défaut les chapitres sont sur la fiche ; à surcharger s'ils arrivent par une requête séparée."""
         return self.parse_chapters(document, series_url)
 
@@ -82,9 +83,9 @@ class SourceExtractor(ABC):
         """URLs absolues des fiches listées sur une page du catalogue (liste vide = fin du catalogue)."""
 
     @abstractmethod
-    def parse_series(self, document: LexborHTMLParser, series_url: str) -> SeriesMetadata:
-        """Métadonnées d'une fiche. Lève `ExtractionError` si la page n'a pas la structure attendue."""
+    def parse_series(self, document: LexborHTMLParser, series_url: str) -> IngestManhwa:
+        """Métadonnées d'une fiche (sans ses chapitres). Lève `ExtractionError` si la structure est inattendue."""
 
     @abstractmethod
-    def parse_chapters(self, document: LexborHTMLParser, series_url: str) -> list[ScrapedChapter]:
+    def parse_chapters(self, document: LexborHTMLParser, series_url: str) -> list[IngestChapter]:
         """Chapitres listés dans `document` (fiche ou fragment AJAX)."""

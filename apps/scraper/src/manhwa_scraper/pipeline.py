@@ -12,10 +12,10 @@ from uuid import UUID
 
 from pydantic import ValidationError
 
+from .contract import HealthSample, HealthStatus, IngestBatch, IngestManhwa, RunOutcome
 from .extractors import ExtractionError, SourceExtractor
 from .fetching import BlockedByAntiBotError, FetchError
 from .ingest_client import IngestClient, IngestError
-from .models import HealthSample, HealthStatus, IngestBatch, RunOutcome, ScrapedManhwa
 
 logger = logging.getLogger(__name__)
 
@@ -63,19 +63,21 @@ class ScrapeRunner:
         try:
             await self._scrape(run.id, stats)
         except BlockedByAntiBotError as error:
-            report = RunReport(run.id, "failed", stats, str(error))
-            await self._close(report, "blocked", http_status=error.status, blocked_by=error.blocked_by)
+            report = RunReport(run.id, RunOutcome.failed, stats, str(error))
+            await self._close(report, HealthStatus.blocked, http_status=error.status, blocked_by=error.blocked_by)
             return report
         except Exception as error:
-            await self._close(RunReport(run.id, "failed", stats, f"{type(error).__name__}: {error}"), "down")
+            await self._close(
+                RunReport(run.id, RunOutcome.failed, stats, f"{type(error).__name__}: {error}"), HealthStatus.down
+            )
             raise
 
         report = _conclude(run.id, stats)
-        await self._close(report, "up" if report.outcome == "succeeded" else "degraded")
+        await self._close(report, HealthStatus.up if report.outcome is RunOutcome.succeeded else HealthStatus.degraded)
         return report
 
     async def _scrape(self, run_id: UUID, stats: RunStats) -> None:
-        pending: list[ScrapedManhwa] = []
+        pending: list[IngestManhwa] = []
         async for url in self._extractor.discover():
             if self._max_series is not None and stats.series_found >= self._max_series:
                 break
@@ -93,7 +95,7 @@ class ScrapeRunner:
         if pending:
             await self._flush(run_id, pending, stats)
 
-    async def _flush(self, run_id: UUID, pending: list[ScrapedManhwa], stats: RunStats) -> None:
+    async def _flush(self, run_id: UUID, pending: list[IngestManhwa], stats: RunStats) -> None:
         batch = IngestBatch(source_id=self._source_id, scrape_run_id=run_id, manhwas=pending)
         # Clé déterministe : si le worker plante puis rejoue ce lot, l'API reconnaît un lot déjà traité.
         result = await self._ingest.send_batch(batch, idempotency_key=f"{run_id}:{stats.batches_sent}")
@@ -131,9 +133,9 @@ class ScrapeRunner:
 def _conclude(run_id: UUID, stats: RunStats) -> RunReport:
     if stats.series_found == 0:
         # Un catalogue vide est presque toujours un sélecteur cassé (refonte du site), pas un site vide.
-        return RunReport(run_id, "failed", stats, "Catalogue vide : sélecteurs à vérifier")
+        return RunReport(run_id, RunOutcome.failed, stats, "Catalogue vide : sélecteurs à vérifier")
     if stats.series_failed == 0:
-        return RunReport(run_id, "succeeded", stats)
+        return RunReport(run_id, RunOutcome.succeeded, stats)
     if stats.series_scraped == 0:
-        return RunReport(run_id, "failed", stats, "Aucune fiche n'a pu être extraite")
-    return RunReport(run_id, "partial", stats)
+        return RunReport(run_id, RunOutcome.failed, stats, "Aucune fiche n'a pu être extraite")
+    return RunReport(run_id, RunOutcome.partial, stats)

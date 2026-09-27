@@ -16,6 +16,7 @@ from pydantic import ValidationError
 
 from . import __version__
 from .config import Settings, load_settings
+from .contract import RunOutcome
 from .extractors import SourceExtractor, UnknownSourceError
 from .extractors.sites import default_registry
 from .fetching import ThrottledFetcher, TieredFetcher
@@ -86,4 +87,4 @@ def main(argv: Sequence[str] | None = None) -> int:
     logging.basicConfig(level=settings.log_level, format="%(asctime)s %(levelname)s %(name)s — %(message)s")
     report = asyncio.run(_run(settings, extractor_cls, args.source_id, args.max_series))
     logging.getLogger(__name__).info("Run %s terminé : %s %s", report.run_id, report.outcome, report.stats)
-    return 0 if report.outcome != "failed" else 1
+    return 0 if report.outcome is not RunOutcome.failed else 1

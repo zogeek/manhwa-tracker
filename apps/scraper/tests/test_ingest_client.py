@@ -6,15 +6,15 @@ from uuid import UUID
 import httpx
 import pytest
 
+from manhwa_scraper.contract import IngestBatch, IngestManhwa
 from manhwa_scraper.ingest_client import IngestClient, IngestError, create_http_client
-from manhwa_scraper.models import IngestBatch, ScrapedManhwa
 
 from .fakes import FakeIngestApi, no_sleep
 
 SOURCE_ID = UUID("0c7e1f0a-0000-4000-8000-000000000001")
 BATCH = IngestBatch(
     source_id=SOURCE_ID,
-    manhwas=[ScrapedManhwa(source_manhwa_url="https://scan.test/manga/solo/", title="Solo")],
+    manhwas=[IngestManhwa(source_manhwa_url="https://scan.test/manga/solo/", title="Solo")],
 )
 
 
