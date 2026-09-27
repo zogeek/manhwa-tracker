@@ -22,6 +22,7 @@
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
     "auth:generate": "auth generate --config better-auth.config.ts --output src/shared/db/auth-schema.ts --yes",
+    "contract:generate": "node --import tsx src/scripts/generate-contract.ts",
     "admin:promote": "node --env-file-if-exists=.env.development --import tsx src/scripts/promote-admin.ts"
   },
   "dependencies": {
