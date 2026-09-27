@@ -19,6 +19,28 @@ uv run manhwa-scraper run <slug> --source-id <uuid-de-la-source> [--max-series 5
 | `lint` / `format` | Ruff (lint + formatage) |
 | `typecheck` | mypy `--strict` (plugin Pydantic) |
 | `test` | pytest — aucun réseau, aucun navigateur (fakes + fixtures HTML synthétiques) |
+| `contract:generate` | Régénère `contract.py` depuis le JSON Schema de l'API (datamodel-codegen) |
+
+## Contrat avec l'API : source unique de vérité
+
+Les modèles des requêtes (`src/manhwa_scraper/contract.py`) ne s'écrivent **pas** à la main :
+
+```
+apps/api/src/modules/ingestion/ingestion.validator.ts   (Zod — la seule source)
+        │  pnpm --filter api contract:generate           (z.toJSONSchema)
+        ▼
+apps/api/contracts/ingestion.schema.json                (JSON Schema, commité)
+        │  pnpm --filter scraper contract:generate       (datamodel-codegen, config dans pyproject.toml)
+        ▼
+apps/scraper/src/manhwa_scraper/contract.py             (Pydantic, commité, ne pas éditer)
+```
+
+Après toute modification du validateur d'ingestion : **`pnpm contract:generate` à la racine**, puis commiter
+les deux fichiers générés. Si on l'oublie, deux tests échouent (Vitest côté API, pytest côté scraper) — et la CI avec.
+
+La politique de validation propre au worker (champs inconnus refusés, modèles immuables) vit dans
+`contract_base.py`, classe de base des modèles générés. Les réponses de l'API, qui ne sont pas décrites
+en Zod, restent dans `models.py` (tolérantes aux champs inconnus).
 
 ## Stack
 
@@ -29,7 +51,7 @@ uv run manhwa-scraper run <slug> --source-id <uuid-de-la-source> [--max-series 5
 | Anti-bot, étage navigateur | **Camoufox** | Firefox dont l'empreinte est falsifiée dans le moteur (C++), pas en JavaScript. Sur astral-manga.fr, Chromium (même patché) reste bloqué par le challenge Cloudflare ; Camoufox le passe. |
 | Pilotage du navigateur | **Playwright** (API seule) | Camoufox se pilote avec l'API Playwright : on garde la « télécommande » (`page.goto`, `page.content`…), seul le navigateur change. Déclaré explicitement car `browser.py` l'importe directement. |
 | Parsing HTML | **selectolax** (Lexbor) | Sélecteurs CSS, parseur en C bien plus rapide que BeautifulSoup. |
-| Validation | **Pydantic v2** (+ pydantic-settings) | Miroir du contrat Zod de l'API : un champ faux échoue côté worker, avec un message lisible, avant l'envoi. |
+| Validation | **Pydantic v2** (+ pydantic-settings) | Modèles **générés** depuis le contrat Zod de l'API (datamodel-codegen) : un champ faux échoue côté worker, avec un message lisible, avant l'envoi. |
 | Client API | **httpx** + **tenacity** | Async, timeouts, transport mockable en test ; ré-essais exponentiels uniquement quand rejouer est sans danger (lots idempotents). |
 
 ## Architecture
@@ -38,7 +60,9 @@ uv run manhwa-scraper run <slug> --source-id <uuid-de-la-source> [--max-series 5
 src/manhwa_scraper/
 ├── cli.py                 composition root : seul endroit qui instancie les implémentations
 ├── config.py              Settings (variables SCRAPER_*)
-├── models.py              contrat /api/ingest (Pydantic, sérialisé en camelCase)
+├── contract.py            modèles des requêtes /api/ingest — GÉNÉRÉ depuis le Zod de l'API
+├── contract_base.py       politique de validation du worker (base des modèles générés)
+├── models.py              réponses de l'API + sérialisation camelCase
 ├── ingest_client.py       client HTTP de l'API (clé de service, ré-essais, idempotence)
 ├── pipeline.py            ScrapeRunner : catalogue → fiches → lots, scrape_runs + source_health
 ├── fetching/
@@ -57,7 +81,7 @@ src/manhwa_scraper/
 ### Ajouter un site
 
 1. Identifier le CMS (`wp-content/themes/madara` → `MadaraExtractor`, `mangareader`/`themesia` → `MangaThemesiaExtractor`, sinon `SourceExtractor`).
-2. Créer `extractors/sites/<site>.py` : `slug`, `name`, `base_url`, et au besoin `series_path` / `selectors`.
+2. Créer `extractors/sites/<site>.py` : `slug`, `name`, `base_url`, et au besoin `series_path` / `selectors`. Un thème enfant Madara se décrit souvent par la seule configuration (`chapter_number_attr`, `chapter_date_attr`…) ; `parse_info_table` se surcharge si le bloc « Statut / Type » est différent (exemple : `mangas_origines.py`).
 3. L'ajouter à `ALL_SOURCES` (`extractors/sites/__init__.py`).
 4. Écrire un test sur une fixture HTML **synthétique** (reproduire la structure, pas le contenu du site), puis passer `ready = True`.
 
@@ -65,7 +89,7 @@ src/manhwa_scraper/
 
 | Source | Moteur | Protection | Étage suffisant | État |
 |---|---|---|---|---|
-| mangas-origines.fr | Madara (thème enfant) | Cloudflare | HTTP | squelette : liste de chapitres maison à cibler |
+| mangas-origines.fr | Madara (thème enfant) | Cloudflare | HTTP | ✅ **prêt** (1 requête par fiche, chapitres compris ; essai réel : 3 œuvres, 417 chapitres ingérés) |
 | scan-manga.com | PHP propriétaire | Cloudflare (filtre TLS) | HTTP (curl_cffi) | squelette |
 | rimuscan.fr | Next.js | Cloudflare (sans challenge) | HTTP | squelette |
 | astral-manga.fr | Next.js | Cloudflare (challenge JS) | Navigateur (Camoufox) | squelette |
