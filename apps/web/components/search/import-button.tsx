@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { api } from "@/app/lib/api";
 import type { ExternalProvider } from "@/app/lib/api-types";
 import { useApiMutation } from "@/hooks/use-api-mutation";
+import { ROUTES } from "@/app/lib/routes";
 
 type ImportButtonProps = {
   provider: ExternalProvider;
@@ -33,7 +34,7 @@ export function ImportButton({ provider, externalId, title }: ImportButtonProps)
           res.status === 201 ? `« ${manhwa.title} » a été ajouté au catalogue.` : `« ${manhwa.title} » était déjà au catalogue.`,
           {
             description: "Couverture et chapitres arrivent en arrière-plan.",
-            action: { label: "Voir la fiche", onClick: () => router.push(`/manhwas/${manhwa.id}`) },
+            action: { label: "Voir la fiche", onClick: () => router.push(ROUTES.manhwa(manhwa.id)) },
           },
         );
       },

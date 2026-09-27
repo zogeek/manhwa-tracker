@@ -11,7 +11,7 @@ const navigation = vi.hoisted(() => {
 
 vi.mock("next/navigation", () => ({
   useRouter: () => navigation.router,
-  usePathname: () => "/catalogue",
+  usePathname: () => "/catalog",
   useSearchParams: () => navigation.state.searchParams,
 }));
 
@@ -41,7 +41,7 @@ describe("CatalogSearch", () => {
 
     await act(() => vi.advanceTimersByTimeAsync(350));
     expect(navigation.router.replace).toHaveBeenCalledTimes(1);
-    expect(navigation.router.replace).toHaveBeenCalledWith("/catalogue?q=solo+lev", { scroll: false });
+    expect(navigation.router.replace).toHaveBeenCalledWith("/catalog?q=solo+lev", { scroll: false });
   });
 
   it("waits for 2 characters (API rule) and says so", async () => {
@@ -59,7 +59,7 @@ describe("CatalogSearch", () => {
 
     await user.type(input, "tbate{Enter}");
 
-    expect(navigation.router.replace).toHaveBeenCalledWith("/catalogue?q=tbate", { scroll: false });
+    expect(navigation.router.replace).toHaveBeenCalledWith("/catalog?q=tbate", { scroll: false });
   });
 
   it("toggles the online catalogues and clears the search", async () => {
@@ -67,10 +67,10 @@ describe("CatalogSearch", () => {
     const { user } = setup();
 
     await user.click(screen.getByRole("button", { name: /Chercher aussi en ligne/ }));
-    expect(navigation.router.replace).toHaveBeenLastCalledWith("/catalogue?q=tbate&external=true", { scroll: false });
+    expect(navigation.router.replace).toHaveBeenLastCalledWith("/catalog?q=tbate&external=true", { scroll: false });
 
     await user.click(screen.getByRole("button", { name: "Effacer la recherche" }));
-    expect(navigation.router.replace).toHaveBeenLastCalledWith("/catalogue", { scroll: false });
+    expect(navigation.router.replace).toHaveBeenLastCalledWith("/catalog", { scroll: false });
     expect(screen.getByRole("searchbox")).toHaveValue("");
   });
 });

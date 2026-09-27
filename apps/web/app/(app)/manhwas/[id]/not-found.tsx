@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { ROUTES } from "@/app/lib/routes";
 
 export default function ManhwaNotFound() {
   return (
@@ -11,7 +12,7 @@ export default function ManhwaNotFound() {
       </CardHeader>
       <CardContent>
         <Button asChild>
-          <Link href="/catalogue">Retour au catalogue</Link>
+          <Link href={ROUTES.catalog}>Retour au catalogue</Link>
         </Button>
       </CardContent>
     </Card>
