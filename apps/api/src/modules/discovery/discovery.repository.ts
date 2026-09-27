@@ -1,7 +1,10 @@
+import { createHash } from 'node:crypto';
 import { and, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import type { DbClient } from '../../shared/db/index.js';
 import {
+  authors,
   externalLinks,
+  manhwaAuthors,
   manhwaCovers,
   manhwaTerms,
   manhwaTitles,
@@ -14,12 +17,26 @@ import { firstOrNull, firstOrThrow } from '../../shared/db/utils.js';
 import { slugify } from '../../shared/lib/slug.js';
 import type { NewManhwaTerm } from '../taxonomy/taxonomy.schema.js';
 import {
+  authorIdentity,
   externalRefKey,
+  mergeAuthors,
+  type ExternalAuthor,
   type ExternalManhwa,
   type ExternalProvider,
   type ExternalRef,
   type ExternalTag,
 } from './external-catalog.js';
+
+/**
+ * Clé d'unicité d'un auteur en base (`authors.slug`). Nom natif → empreinte (les caractères
+ * non latins ne donnent pas de slug lisible) ; nom latin → slug lisible (« chugong »).
+ */
+export function authorSlug(author: Pick<ExternalAuthor, 'name' | 'nativeName'>): string {
+  const identity = authorIdentity(author);
+  return identity.startsWith('native:')
+    ? `native-${createHash('sha256').update(identity).digest('hex').slice(0, 16)}`
+    : slugify(identity.slice('latin:'.length), 'author');
+}
 
 /** Provenance des tags posés par l'import (≠ `curated` d'un admin, ≠ `scraper`). */
 const EXTERNAL_TERM_SOURCE: NewManhwaTerm['source'] = 'external';
@@ -55,6 +72,13 @@ export interface DiscoveryRepository {
    * Renvoie le nombre de termes rattachés.
    */
   attachTerms(manhwaId: string, vocabulary: VocabularyRef, tags: readonly ExternalTag[]): Promise<number>;
+  /**
+   * Rattache les auteurs (créés à la volée, reconnus par leur identité : nom natif, sinon nom latin
+   * normalisé) dans l'ordre fourni.
+   * Un auteur déjà rattaché est conservé tel quel (import depuis un second fournisseur). Renvoie le nombre de liens créés.
+   */
+  attachAuthors(manhwaId: string, authors: readonly ExternalAuthor[]): Promise<number>;
+  hasAuthors(manhwaId: string): Promise<boolean>;
 }
 
 export class DrizzleDiscoveryRepository implements DiscoveryRepository {
@@ -150,6 +174,46 @@ export class DrizzleDiscoveryRepository implements DiscoveryRepository {
       // Deux contraintes possibles (fiche+fournisseur, fournisseur+id) : on les ignore toutes les deux.
       .onConflictDoNothing()
       .returning({ id: externalLinks.id });
+    return inserted.length;
+  }
+
+  async hasAuthors(manhwaId: string): Promise<boolean> {
+    const rows = await this.db
+      .select({ authorId: manhwaAuthors.authorId })
+      .from(manhwaAuthors)
+      .where(eq(manhwaAuthors.manhwaId, manhwaId))
+      .limit(1);
+    return rows.length > 0;
+  }
+
+  async attachAuthors(manhwaId: string, list: readonly ExternalAuthor[]): Promise<number> {
+    // Même personne sous deux graphies dans la liste : une seule entrée (rôle « both » si besoin).
+    const merged = mergeAuthors(list);
+    if (merged.length === 0) return 0;
+    const bySlug = new Map(merged.map((author, position) => [authorSlug(author), { ...author, position }]));
+
+    const rows = await this.db
+      .insert(authors)
+      .values([...bySlug].map(([slug, { name, nativeName }]) => ({ slug, name, nativeName })))
+      // Personne déjà connue : on garde son nom affiché, on complète seulement un nom natif manquant.
+      // (DO UPDATE plutôt que DO NOTHING : RETURNING renvoie aussi les auteurs existants.)
+      .onConflictDoUpdate({
+        target: authors.slug,
+        set: { nativeName: sql`COALESCE(${authors.nativeName}, excluded.native_name)` },
+      })
+      .returning({ id: authors.id, slug: authors.slug });
+    const idBySlug = new Map(rows.map((row) => [row.slug, row.id]));
+
+    const inserted = await this.db
+      .insert(manhwaAuthors)
+      .values(
+        [...bySlug].flatMap(([slug, { role, position }]) => {
+          const authorId = idBySlug.get(slug);
+          return authorId ? [{ manhwaId, authorId, role, position }] : [];
+        }),
+      )
+      .onConflictDoNothing()
+      .returning({ authorId: manhwaAuthors.authorId });
     return inserted.length;
   }
 

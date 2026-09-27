@@ -2,12 +2,15 @@ import { z } from 'zod';
 import type { HttpFetch } from '../../shared/http/outbound.js';
 import { BadGatewayError, ServiceUnavailableError } from '../../shared/lib/errors.js';
 import type { Manhwa } from '../manhwas/manhwa.schema.js';
-import type {
-  ExternalCatalogProvider,
-  ExternalManhwa,
-  ExternalProvider,
-  ExternalTag,
-  ExternalTitle,
+import {
+  mergeAuthors,
+  parseAuthorRole,
+  type ExternalAuthor,
+  type ExternalCatalogProvider,
+  type ExternalManhwa,
+  type ExternalProvider,
+  type ExternalTag,
+  type ExternalTitle,
 } from './external-catalog.js';
 
 export type AniListClientOptions = {
@@ -33,6 +36,7 @@ const MEDIA_FIELDS = `
   coverImage { extraLarge large }
   genres
   tags { name rank isMediaSpoiler }
+  staff(perPage: 10, sort: [RELEVANCE, ROLE]) { edges { role node { name { full native } } } }
 `;
 
 // Filtres côté AniList : mangas uniquement, ni romans ni contenu adulte.
@@ -71,6 +75,16 @@ const mediaSchema = z.object({
   tags: z
     .array(z.object({ name: z.string(), rank: z.number().nullable(), isMediaSpoiler: z.boolean().nullable() }))
     .nullable(),
+  staff: z
+    .object({
+      edges: z.array(
+        z.object({
+          role: z.string().nullable(),
+          node: z.object({ name: z.object({ full: z.string().nullable(), native: z.string().nullable() }) }).nullable(),
+        }),
+      ),
+    })
+    .nullish(),
 });
 
 type AniListMedia = z.infer<typeof mediaSchema>;
@@ -149,6 +163,17 @@ function relevantTags(media: AniListMedia): ExternalTag[] {
     }));
 }
 
+function authorsOf(media: AniListMedia): ExternalAuthor[] {
+  return mergeAuthors(
+    (media.staff?.edges ?? []).flatMap((edge) => {
+      const role = parseAuthorRole(edge.role);
+      const nativeName = clean(edge.node?.name.native);
+      const name = clean(edge.node?.name.full) ?? nativeName;
+      return role && name ? [{ name, nativeName, role }] : [];
+    }),
+  );
+}
+
 /** Traduit une fiche AniList dans le vocabulaire du domaine. */
 export function toExternalManhwa(media: AniListMedia): ExternalManhwa {
   const title =
@@ -171,6 +196,7 @@ export function toExternalManhwa(media: AniListMedia): ExternalManhwa {
     endDate: toIsoDate(media.endDate),
     genres: [...new Set((media.genres ?? []).map((genre) => genre.trim()).filter(Boolean))],
     tags: relevantTags(media),
+    authors: authorsOf(media),
     // AniList n'expose pas les identifiants des autres catalogues : c'est MangaDex qui pointe vers AniList.
     crossReferences: [],
   };

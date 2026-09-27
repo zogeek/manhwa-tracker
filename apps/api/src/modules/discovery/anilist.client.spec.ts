@@ -39,6 +39,11 @@ describe('AniListClient', () => {
         { name: 'Reincarnation', relevance: 95, isSpoiler: false },
         { name: 'Magic', relevance: 90, isSpoiler: false },
       ],
+      // Le traducteur n'est pas un auteur de l'œuvre : écarté.
+      authors: [
+        { name: 'TurtleMe', nativeName: '터틀미', role: 'story' },
+        { name: 'Fuyuki23', nativeName: null, role: 'art' },
+      ],
       crossReferences: [],
     });
   });

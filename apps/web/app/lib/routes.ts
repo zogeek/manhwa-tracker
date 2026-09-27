@@ -3,9 +3,10 @@
 
 export const ROUTES = {
   home: "/",
+  login: "/login",
   catalog: "/catalog",
   library: "/library",
-  settings: "/parametres",
+  settings: "/settings",
   manhwa: (id: string) => `/manhwas/${id}`,
 } as const;
 
@@ -13,4 +14,5 @@ export const ROUTES = {
 export const LEGACY_ROUTES: readonly { from: string; to: string }[] = [
   { from: "/catalogue", to: ROUTES.catalog },
   { from: "/bibliotheque", to: ROUTES.library },
+  { from: "/parametres", to: ROUTES.settings },
 ];

@@ -33,7 +33,7 @@ describe('MangaDexClient.search', () => {
     expect(url?.searchParams.get('title')).toBe('beginning after');
     expect(url?.searchParams.get('limit')).toBe('5');
     expect(url?.searchParams.getAll('contentRating[]')).toEqual(['safe', 'suggestive']);
-    expect(url?.searchParams.getAll('includes[]')).toEqual(['cover_art']);
+    expect(url?.searchParams.getAll('includes[]')).toEqual(['cover_art', 'author', 'artist']);
     expect(calls[0]?.init?.headers).toMatchObject({ 'User-Agent': expect.stringContaining('manhwa-tracker') });
 
     expect(manhwa).toEqual({
@@ -61,6 +61,12 @@ describe('MangaDexClient.search', () => {
       tags: [
         { name: 'Reincarnation', relevance: 75, isSpoiler: false },
         { name: 'Magic', relevance: 75, isSpoiler: false },
+      ],
+      // Une même personne citée comme « author » ET « artist » devient un seul auteur « both ».
+      authors: [
+        { name: 'Turtle-Me', nativeName: '터틀미', role: 'story' }, // « Turtle-Me (터틀미) » côté MangaDex
+        { name: 'Fuyuki23', nativeName: null, role: 'art' },
+        { name: 'Studio Waveon', nativeName: null, role: 'both' },
       ],
       crossReferences: [{ provider: 'anilist', externalId: '105398', url: 'https://anilist.co/manga/105398' }],
     });

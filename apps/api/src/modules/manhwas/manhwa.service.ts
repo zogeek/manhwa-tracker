@@ -1,16 +1,16 @@
 import { NotFoundError } from '../../shared/lib/errors.js';
 import type { ManhwaRepository } from './manhwa.repository.js';
-import type { Manhwa } from './manhwa.schema.js';
+import type { Manhwa, ManhwaView } from './manhwa.schema.js';
 import type { CreateManhwaInput, UpdateManhwaInput } from './manhwa.validator.js';
 
 export class ManhwaService {
   constructor(private readonly repo: ManhwaRepository) {}
 
-  async getAll(): Promise<Manhwa[]> {
+  async getAll(): Promise<ManhwaView[]> {
     return this.repo.findAll();
   }
 
-  async getById(id: Manhwa['id']): Promise<Manhwa> {
+  async getById(id: Manhwa['id']): Promise<ManhwaView> {
     const manhwa = await this.repo.findById(id);
     if (!manhwa) throw new NotFoundError('Manhwa', id);
     return manhwa;

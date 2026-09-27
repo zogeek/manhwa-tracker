@@ -23,6 +23,76 @@ export type ExternalTitle = {
   language: string | null;
 };
 
+/** Rôle d'un auteur (enum `author_role`) : scénario, dessin, ou les deux. */
+export type AuthorRole = 'story' | 'art' | 'both';
+
+/**
+ * Auteur d'une œuvre, dans l'ordre d'importance donné par le fournisseur. `nativeName` (추공)
+ * est la meilleure clé entre catalogues : les romanisations divergent (« Chu-Gong », « Chugong »).
+ */
+export type ExternalAuthor = { name: string; nativeName: string | null; role: AuthorRole };
+
+/**
+ * Identité d'une personne pour le dédoublonnage : son nom natif s'il est connu (stable d'un
+ * catalogue à l'autre), sinon son nom latin sans casse, accents, tirets ni ordre des mots
+ * (« So-Ryeong Gi » = « Gi So-Ryeong »).
+ */
+export function authorIdentity({ name, nativeName }: Pick<ExternalAuthor, 'name' | 'nativeName'>): string {
+  const native = nativeName?.replace(/\s+/g, '');
+  if (native) return `native:${native}`;
+  const tokens = name
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .split(/\s+/)
+    .map((token) => token.replace(/[^\p{L}\p{N}]/gu, ''))
+    .filter(Boolean)
+    .sort();
+  return `latin:${tokens.join(' ')}`;
+}
+
+/** « Chugong (추공) » (format MangaDex) → nom latin + nom natif. */
+export function splitNativeName(raw: string): Pick<ExternalAuthor, 'name' | 'nativeName'> {
+  const match = /^(.+?)\s*\(([^()]+)\)\s*$/.exec(raw.trim());
+  return match?.[1] && match[2] ? { name: match[1].trim(), nativeName: match[2].trim() } : { name: raw.trim(), nativeName: null };
+}
+
+/**
+ * Rôle en texte libre (AniList, Kitsu : « Story & Art », « Original Creator », « Art (assistant) »…) → rôle du domaine.
+ * Traduction, lettrage, édition, assistants… ne sont pas des auteurs de l'œuvre : `null`.
+ */
+export function parseAuthorRole(role: string | null): AuthorRole | null {
+  const value = (role ?? '').toLowerCase();
+  if (/assistant|translat|letter|edit|touch-up|design/.test(value)) return null;
+  const story = /story|original creator|writer|author/.test(value);
+  const art = /\bart\b|illustrat/.test(value);
+  if (story && art) return 'both';
+  if (story) return 'story';
+  if (art) return 'art';
+  return null;
+}
+
+/**
+ * Fusionne les entrées d'une même personne (MangaDex la cite comme « author » ET « artist ») :
+ * un seul auteur, rôle « both », à la place de sa première apparition.
+ */
+export function mergeAuthors(authors: readonly ExternalAuthor[], max = 10): ExternalAuthor[] {
+  const byKey = new Map<string, ExternalAuthor>();
+  for (const author of authors) {
+    const name = author.name.trim();
+    if (!name || name.length > 200) continue;
+    const key = authorIdentity(author);
+    const known = byKey.get(key);
+    byKey.set(
+      key,
+      known
+        ? { ...known, nativeName: known.nativeName ?? author.nativeName, role: known.role === author.role ? known.role : 'both' }
+        : { ...author, name },
+    );
+  }
+  return [...byKey.values()].slice(0, max);
+}
+
 export type ExternalTag = {
   name: string;
   /** Pertinence 0-100 (→ `manhwa_terms.relevance`). */
@@ -50,6 +120,7 @@ export type ExternalManhwa = {
   endDate: string | null;
   genres: string[];
   tags: ExternalTag[];
+  authors: ExternalAuthor[];
   /**
    * La même œuvre chez d'autres fournisseurs, quand celui-ci la connaît (MangaDex expose l'id AniList).
    * Sert à éviter les doublons : importer depuis MangaDex une œuvre déjà importée depuis AniList

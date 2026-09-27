@@ -3,6 +3,7 @@ import type { PgUpdateSetSource } from 'drizzle-orm/pg-core';
 import type { DbClient } from '../../shared/db/index.js';
 import { chapters, manhwas } from '../../shared/db/schema.js';
 import { firstOrNull, firstOrThrow } from '../../shared/db/utils.js';
+import { loadManhwaExtras } from '../manhwas/manhwa-extras.js';
 import {
   chapterReads,
   readingProgress,
@@ -53,7 +54,15 @@ export class DrizzleReadingProgressRepository implements ReadingProgressReposito
       .innerJoin(manhwas, and(eq(readingProgress.manhwaId, manhwas.id), isNull(manhwas.deletedAt)))
       .where(eq(readingProgress.userId, userId))
       .orderBy(desc(readingProgress.updatedAt));
-    return rows.map(({ progress, manhwa }) => ({ ...progress, manhwa }));
+    // Auteurs et couvertures locales de toute la bibliothèque en deux requêtes groupées (pas de N+1).
+    const extras = await loadManhwaExtras(
+      this.db,
+      rows.map(({ manhwa }) => manhwa.id),
+    );
+    return rows.map(({ progress, manhwa }) => ({
+      ...progress,
+      manhwa: { ...manhwa, ...(extras.get(manhwa.id) ?? { authors: [], localCoverUrl: null }) },
+    }));
   }
 
   async delete(userId: string, manhwaId: string): Promise<ReadingProgress | null> {

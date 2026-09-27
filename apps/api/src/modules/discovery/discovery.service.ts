@@ -9,7 +9,7 @@ import {
 import type { JobQueue } from '../jobs/job.repository.js';
 import type { JobRequest } from '../jobs/job.types.js';
 import type { ManhwaRepository } from '../manhwas/manhwa.repository.js';
-import type { Manhwa, ManhwaSearchHit } from '../manhwas/manhwa.schema.js';
+import type { ManhwaSearchHit, ManhwaView } from '../manhwas/manhwa.schema.js';
 import type { DiscoveryRepository, ExternalLinkTarget, VocabularyRef } from './discovery.repository.js';
 import type { CatalogSearchQuery, ImportManhwaInput } from './discovery.validator.js';
 import {
@@ -42,7 +42,7 @@ export type CatalogSearchResult = {
   providers: ProviderSearchReport[];
 };
 
-export type ImportOutcome = { manhwa: Manhwa; created: boolean };
+export type ImportOutcome = { manhwa: ManhwaView; created: boolean };
 
 type ProviderOutcome = { provider: ExternalProvider; status: ExternalSearchStatus; items: ExternalManhwa[] };
 type ImportTarget = ExternalLinkTarget & { created: boolean };
@@ -127,6 +127,9 @@ export class DiscoveryService {
         const linked =
           (await discovery.linkExternalRefs(sibling.manhwaId, [selfRef(item)])) +
           (await discovery.linkExternalRefs(sibling.manhwaId, item.crossReferences));
+        // Auteurs : seulement si la fiche n'en a aucun (ex. importée de Kitsu). Sinon on garde ceux du
+        // premier catalogue — les graphies varient trop d'un catalogue à l'autre pour les fusionner sans risque.
+        if (!(await discovery.hasAuthors(sibling.manhwaId))) await discovery.attachAuthors(sibling.manhwaId, item.authors);
         // De nouveaux liens peuvent ouvrir l'accès à un flux de chapitres : on redemande une synchronisation.
         if (linked > 0) await jobs.enqueue(this.followUpJobs(sibling.manhwaId, item, { mirrorCover: false }));
         return { ...sibling, created: false };
@@ -140,6 +143,7 @@ export class DiscoveryService {
         item.genres.map((name) => ({ name, relevance: 100, isSpoiler: false })),
       );
       await discovery.attachTerms(manhwaId, IMPORT_VOCABULARIES.tags, item.tags);
+      await discovery.attachAuthors(manhwaId, item.authors);
       await jobs.enqueue(this.followUpJobs(manhwaId, item, { mirrorCover: true }));
       return { manhwaId, deleted: false, created: true };
     });

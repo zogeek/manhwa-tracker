@@ -1,15 +1,16 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
-import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, CalendarDays, ImageOff, Star } from "lucide-react";
+import { ArrowLeft, CalendarDays, Star } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { AuthorCredits } from "@/components/manhwa/author-list";
+import { CoverImage } from "@/components/manhwa/cover-image";
 import { ManhwaTags, ManhwaTagsSkeleton } from "@/components/manhwa/manhwa-tags";
 import { ChapterList, ChapterListSkeleton } from "@/components/reading/chapter-list";
 import { ReadingPanel, ReadingPanelSkeleton } from "@/components/reading/reading-panel";
-import { coverSrc } from "@/app/lib/cover";
+import { coverSources } from "@/app/lib/cover";
 import { verifySession } from "@/app/lib/dal";
 import { formatDate } from "@/app/lib/format";
 import { MANHWA_TYPE_LABELS, PUBLICATION_STATUS_LABELS } from "@/app/lib/labels";
@@ -32,8 +33,6 @@ export default async function ManhwaPage({ params }: ManhwaPageProps) {
   const manhwa = await getManhwa(id);
   if (!manhwa) notFound();
 
-  const cover = coverSrc(manhwa.coverUrl);
-
   return (
     <>
       <Button variant="ghost" size="sm" asChild className="self-start">
@@ -46,22 +45,13 @@ export default async function ManhwaPage({ params }: ManhwaPageProps) {
       <div className="grid gap-8 lg:grid-cols-[280px_1fr]">
         <aside className="flex flex-col gap-4">
           <div className="bg-muted relative aspect-[2/3] overflow-hidden rounded-xl border">
-            {cover ? (
-              <Image
-                src={cover}
-                alt={`Couverture de ${manhwa.title}`}
-                fill
-                unoptimized
-                priority
-                sizes="(min-width: 1024px) 280px, 100vw"
-                className="object-cover"
-              />
-            ) : (
-              <div className="text-muted-foreground flex size-full flex-col items-center justify-center gap-2">
-                <ImageOff className="size-10" aria-hidden />
-                <span className="text-sm">Pas de couverture</span>
-              </div>
-            )}
+            <CoverImage
+              sources={coverSources(manhwa)}
+              alt={`Couverture de ${manhwa.title}`}
+              priority
+              sizes="(min-width: 1024px) 280px, 100vw"
+              className="object-cover"
+            />
           </div>
           <Suspense fallback={<ReadingPanelSkeleton />}>
             <ReadingPanel manhwa={manhwa} />
@@ -78,6 +68,7 @@ export default async function ManhwaPage({ params }: ManhwaPageProps) {
                 </p>
               )}
             </div>
+            <AuthorCredits authors={manhwa.authors} />
             <div className="flex flex-wrap items-center gap-2">
               <Badge>{MANHWA_TYPE_LABELS[manhwa.type]}</Badge>
               <Badge variant="secondary">{PUBLICATION_STATUS_LABELS[manhwa.status]}</Badge>
