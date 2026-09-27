@@ -2,13 +2,13 @@ import { z } from 'zod';
 import type { HttpFetch } from '../../shared/http/outbound.js';
 import { BadGatewayError, ServiceUnavailableError } from '../../shared/lib/errors.js';
 import type { Manhwa } from '../manhwas/manhwa.schema.js';
-import type {
-  ExternalCatalogProvider,
-  ExternalManhwa,
-  ExternalProvider,
-  ExternalRef,
-  ExternalTag,
-  ExternalTitle,
+import {
+  type ExternalCatalogProvider,
+  type ExternalManhwa,
+  type ExternalProvider,
+  type ExternalRef,
+  type ExternalTag,
+  type ExternalTitle,
 } from './external-catalog.js';
 
 export type KitsuClientOptions = {
@@ -73,7 +73,11 @@ const includedSchema = z.object({
   type: z.string(),
   id: z.string(),
   attributes: z
-    .object({ title: z.string().nullish(), externalSite: z.string().nullish(), externalId: z.string().nullish() })
+    .object({
+      title: z.string().nullish(),
+      externalSite: z.string().nullish(),
+      externalId: z.string().nullish(),
+    })
     .nullish(),
 });
 
@@ -191,6 +195,9 @@ export function toExternalManhwa(manga: KitsuManga, included: ReadonlyMap<string
     endDate: isoDate(a.endDate),
     genres: [...new Set(categories.filter((name) => GENRES.has(name)))],
     tags,
+    // L'API Kitsu n'expose pas l'équipe des mangas (relations `staff` et `mangaStaff` vides, vérifié
+    // sur des œuvres réelles) : les auteurs viendront d'AniList ou de MangaDex si l'œuvre y est liée.
+    authors: [],
     crossReferences: crossReferences(related(manga.relationships?.mappings?.data, included)),
   };
 }

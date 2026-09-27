@@ -43,7 +43,10 @@ export function mangaDexManga(overrides: MangaOverrides = {}) {
       ],
     },
     relationships: [
-      { id: 'author-1', type: 'author' },
+      { id: 'author-1', type: 'author', attributes: { name: 'Turtle-Me (터틀미)' } },
+      { id: 'artist-1', type: 'artist', attributes: { name: 'Fuyuki23' } },
+      { id: 'author-2', type: 'author', attributes: { name: 'Studio Waveon' } },
+      { id: 'artist-2', type: 'artist', attributes: { name: 'Studio Waveon' } },
       { id: 'cover-1', type: 'cover_art', attributes: { fileName: 'b1461071-cover.jpg', volume: null } },
     ],
   };

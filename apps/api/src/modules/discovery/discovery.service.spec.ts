@@ -13,11 +13,12 @@ import { TtlCache } from '../../shared/lib/ttl-cache.js';
 import type { JobQueue } from '../jobs/job.repository.js';
 import type { JobRequest } from '../jobs/job.types.js';
 import type { ManhwaRepository } from '../manhwas/manhwa.repository.js';
-import type { Manhwa, ManhwaSearchHit } from '../manhwas/manhwa.schema.js';
+import type { ManhwaSearchHit, ManhwaView } from '../manhwas/manhwa.schema.js';
 import type { DiscoveryRepository, ExternalLinkTarget, VocabularyRef } from './discovery.repository.js';
 import { DiscoveryService, IMPORT_VOCABULARIES, type DiscoveryRepositories } from './discovery.service.js';
 import {
   externalRefKey,
+  type ExternalAuthor,
   type ExternalCatalogProvider,
   type ExternalManhwa,
   type ExternalProvider,
@@ -26,7 +27,7 @@ import {
 } from './external-catalog.js';
 import { CachedCatalogProvider, RateLimitedCatalogProvider } from './external-catalog.decorators.js';
 
-function buildManhwa(overrides: Partial<Manhwa> = {}): Manhwa {
+function buildManhwa(overrides: Partial<ManhwaView> = {}): ManhwaView {
   const now = new Date();
   return {
     id: randomUUID(),
@@ -46,6 +47,8 @@ function buildManhwa(overrides: Partial<Manhwa> = {}): Manhwa {
     createdBy: null,
     updatedBy: null,
     deletedAt: null,
+    authors: [],
+    localCoverUrl: null,
     ...overrides,
   };
 }
@@ -68,6 +71,7 @@ function buildExternal(overrides: Partial<ExternalManhwa> = {}): ExternalManhwa 
     endDate: null,
     genres: ['Action'],
     tags: [{ name: 'Magic', relevance: 90, isSpoiler: false }],
+    authors: [{ name: 'TurtleMe', nativeName: null, role: 'story' }],
     crossReferences: [],
     ...overrides,
   };
@@ -87,7 +91,7 @@ const buildMangaDex = (overrides: Partial<ExternalManhwa> = {}) =>
   });
 
 class InMemoryManhwas implements Pick<ManhwaRepository, 'search' | 'findById'> {
-  readonly rows = new Map<string, Manhwa>();
+  readonly rows = new Map<string, ManhwaView>();
 
   async search(query: string): Promise<ManhwaSearchHit[]> {
     return [...this.rows.values()]
@@ -95,7 +99,7 @@ class InMemoryManhwas implements Pick<ManhwaRepository, 'search' | 'findById'> {
       .map((manhwa) => ({ ...manhwa, score: 1 }));
   }
 
-  async findById(id: string): Promise<Manhwa | null> {
+  async findById(id: string): Promise<ManhwaView | null> {
     return this.rows.get(id) ?? null;
   }
 }
@@ -139,6 +143,17 @@ class InMemoryDiscoveryRepository implements DiscoveryRepository {
       created += 1;
     }
     return created;
+  }
+
+  readonly authorLinks: { manhwaId: string; authors: readonly ExternalAuthor[] }[] = [];
+
+  async hasAuthors(manhwaId: string): Promise<boolean> {
+    return this.authorLinks.some((link) => link.manhwaId === manhwaId && link.authors.length > 0);
+  }
+
+  async attachAuthors(manhwaId: string, authors: readonly ExternalAuthor[]): Promise<number> {
+    this.authorLinks.push({ manhwaId, authors });
+    return authors.length;
   }
 
   async attachTerms(manhwaId: string, vocabulary: VocabularyRef, tags: readonly ExternalTag[]): Promise<number> {
@@ -290,6 +305,9 @@ describe('DiscoveryService.importManhwa', () => {
     ]);
     expect(repo.attached[0]?.tags).toEqual([{ name: 'Action', relevance: 100, isSpoiler: false }]);
     expect(repo.locked).toEqual([['anilist:105398']]);
+    expect(repo.authorLinks).toEqual([
+      { manhwaId: outcome.manhwa.id, authors: [{ name: 'TurtleMe', nativeName: null, role: 'story' }] },
+    ]);
   });
 
   it('is idempotent: a second import returns the same manhwa without calling the provider', async () => {
@@ -378,10 +396,24 @@ describe('DiscoveryService.importManhwa — cross-provider deduplication', () =>
     expect(fromMangaDex).toEqual({ manhwa: fromAniList.manhwa, created: false });
     expect(manhwas.rows.size).toBe(1);
     expect(repo.links.get(`mangadex:${MANGADEX_ID}`)?.manhwaId).toBe(fromAniList.manhwa.id);
+    // La fiche AniList a déjà ses auteurs : ceux de MangaDex (autres graphies) ne s'y ajoutent pas.
+    expect(repo.authorLinks).toHaveLength(1);
     // La fiche a déjà sa couverture ; ses nouveaux liens (MangaDex) justifient une nouvelle synchronisation.
     expect(jobs.enqueued.map((job) => job.type)).toEqual(['chapters.sync']);
     // Les deux références sont verrouillées : un import AniList simultané attendrait son tour.
     expect(repo.locked.at(-1)).toEqual([`mangadex:${MANGADEX_ID}`, 'anilist:105398']);
+  });
+
+  it('gives authors to a sibling that had none (e.g. imported from a catalogue without staff)', async () => {
+    provider.catalog[0] = buildExternal({ authors: [] });
+    const fromAniList = await service.importManhwa({ provider: 'anilist', externalId: '105398' }, 'user-1');
+
+    await service.importManhwa({ provider: 'mangadex', externalId: MANGADEX_ID }, 'user-2');
+
+    expect(repo.authorLinks.at(-1)).toEqual({
+      manhwaId: fromAniList.manhwa.id,
+      authors: [{ name: 'TurtleMe', nativeName: null, role: 'story' }],
+    });
   });
 
   it('refuses to attach to a sibling that an admin removed', async () => {

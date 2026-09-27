@@ -2,16 +2,19 @@ import { z } from 'zod';
 import type { HttpFetch } from '../../shared/http/outbound.js';
 import { BadGatewayError, NotFoundError, ServiceUnavailableError } from '../../shared/lib/errors.js';
 import type { Manhwa } from '../manhwas/manhwa.schema.js';
-import type {
-  ExternalCatalogProvider,
-  ExternalChapter,
-  ExternalChapterFeed,
-  ExternalManhwa,
-  ExternalProvider,
-  ExternalRef,
-  ExternalSource,
-  ExternalTag,
-  ExternalTitle,
+import {
+  mergeAuthors,
+  splitNativeName,
+  type ExternalAuthor,
+  type ExternalCatalogProvider,
+  type ExternalChapter,
+  type ExternalChapterFeed,
+  type ExternalManhwa,
+  type ExternalProvider,
+  type ExternalRef,
+  type ExternalSource,
+  type ExternalTag,
+  type ExternalTitle,
 } from './external-catalog.js';
 
 export type MangaDexClientOptions = {
@@ -31,6 +34,8 @@ const COVERS_URL = 'https://uploads.mangadex.org/covers';
 const USER_AGENT = 'manhwa-tracker/1.0 (+https://github.com/zogeek/manhwa-tracker)';
 // Pas de contenu adulte, comme pour AniList (`isAdult: false`).
 const CONTENT_RATINGS = ['safe', 'suggestive'];
+// Relations embarquées dans la réponse : couverture, scénariste(s) et dessinateur(s).
+const MANGA_INCLUDES = ['cover_art', 'author', 'artist'];
 const FEED_PAGE_SIZE = 500;
 // Les tags MangaDex sont binaires (pas de rang communautaire comme AniList) : pertinence fixe.
 const THEME_TAG_RELEVANCE = 75;
@@ -164,6 +169,18 @@ function tagNames(manga: MangaDexManga, group: string): string[] {
   return [...new Set(names)];
 }
 
+/** Relations `author` (scénario) et `artist` (dessin) embarquées ; la même personne des deux côtés → « both ». */
+function authorsOf(manga: MangaDexManga): ExternalAuthor[] {
+  return mergeAuthors(
+    (manga.relationships ?? []).flatMap((relationship): ExternalAuthor[] => {
+      const role = relationship.type === 'author' ? 'story' : relationship.type === 'artist' ? 'art' : null;
+      const name = relationship.attributes?.['name'];
+      // MangaDex accole le nom natif entre parenthèses : « Chugong (추공) ».
+      return role && typeof name === 'string' ? [{ ...splitNativeName(name), role }] : [];
+    }),
+  );
+}
+
 function coverUrl(manga: MangaDexManga): string | null {
   const cover = manga.relationships?.find((relationship) => relationship.type === 'cover_art');
   const fileName = cover?.attributes?.['fileName'];
@@ -211,6 +228,7 @@ export function toExternalManhwa(manga: MangaDexManga): ExternalManhwa {
     endDate: null,
     genres: tagNames(manga, 'genre'),
     tags,
+    authors: authorsOf(manga),
     crossReferences: crossReferences(manga),
   };
 }
@@ -252,7 +270,7 @@ export class MangaDexClient implements ExternalCatalogProvider, ExternalChapterF
 
   async search(query: string, limit: number): Promise<ExternalManhwa[]> {
     const url = this.url('/manga', { title: query, limit: String(limit), 'order[relevance]': 'desc' });
-    url.searchParams.append('includes[]', 'cover_art');
+    for (const include of MANGA_INCLUDES) url.searchParams.append('includes[]', include);
     for (const rating of CONTENT_RATINGS) url.searchParams.append('contentRating[]', rating);
 
     const res = await this.get(url);
@@ -264,7 +282,7 @@ export class MangaDexClient implements ExternalCatalogProvider, ExternalChapterF
   async findById(externalId: string): Promise<ExternalManhwa | null> {
     if (!UUID_PATTERN.test(externalId)) return null;
     const url = this.url(`/manga/${externalId.toLowerCase()}`);
-    url.searchParams.append('includes[]', 'cover_art');
+    for (const include of MANGA_INCLUDES) url.searchParams.append('includes[]', include);
 
     const res = await this.get(url);
     if (res.status === 404) {

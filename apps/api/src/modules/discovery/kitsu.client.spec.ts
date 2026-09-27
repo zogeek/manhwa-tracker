@@ -46,6 +46,7 @@ describe('KitsuClient.search', () => {
         { name: 'Magic', relevance: 60, isSpoiler: false },
         { name: 'Reincarnation', relevance: 60, isSpoiler: false },
       ],
+      authors: [], // Kitsu n'expose pas l'équipe des mangas
       // Seule la correspondance AniList nous concerne (MyAnimeList n'est pas un de nos fournisseurs).
       crossReferences: [{ provider: 'anilist', externalId: '105398', url: 'https://anilist.co/manga/105398' }],
     });

@@ -31,6 +31,13 @@ export function aniListMedia(overrides: MediaOverrides = {}) {
     startDate: { year: 2018, month: 7, day: 17 },
     endDate: { year: null, month: null, day: null },
     coverImage: { extraLarge: `https://s4.anilist.co/file/anilistcdn/media/manga/cover/large/${id}.jpg`, large: null },
+    staff: {
+      edges: [
+        { role: 'Story', node: { name: { full: 'TurtleMe', native: '터틀미' } } },
+        { role: 'Art', node: { name: { full: 'Fuyuki23', native: null } } },
+        { role: 'Translator (English)', node: { name: { full: 'Someone Else', native: null } } },
+      ],
+    },
     genres: overrides.genres ?? ['Action', 'Adventure', 'Fantasy'],
     tags: overrides.tags ?? [
       { name: 'Reincarnation', rank: 95, isMediaSpoiler: false },
