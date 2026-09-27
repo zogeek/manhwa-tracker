@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { TransactionRunner } from '../../shared/db/transaction.js';
 import { ConflictError, NotFoundError } from '../../shared/lib/errors.js';
-import type { IngestionRepository, ManhwaSourceLink } from './ingestion.repository.js';
+import type { IngestionRepository, ManhwaSourceLink, TeamInput, UpsertedRelease } from './ingestion.repository.js';
 import type {
   IngestionBatch,
   NewChapterRelease,
@@ -76,16 +76,26 @@ class InMemoryIngestionRepository implements IngestionRepository {
     return { id, created: true };
   }
 
-  async upsertScanlationGroup(): Promise<string> {
-    return randomUUID();
+  readonly teamsByName = new Map<string, string>();
+  readonly releaseTeams = new Map<string, readonly string[]>();
+
+  async upsertTeam({ name }: TeamInput): Promise<string | null> {
+    if (!name) return null;
+    const id = this.teamsByName.get(name) ?? randomUUID();
+    this.teamsByName.set(name, id);
+    return id;
   }
 
-  async upsertRelease(data: NewChapterRelease): Promise<boolean> {
+  async setReleaseTeams(releaseId: string, teamIds: readonly string[]): Promise<void> {
+    if (teamIds.length > 0) this.releaseTeams.set(releaseId, teamIds);
+  }
+
+  async upsertRelease(data: NewChapterRelease): Promise<UpsertedRelease> {
     this.writes += 1;
     const key = `${data.sourceId}|${data.url}`;
     const created = !this.releases.has(key);
     this.releases.add(key);
-    return created;
+    return { id: key, created };
   }
 
   async linkManhwaSource({ sourceId, manhwaUrl, manhwaId }: ManhwaSourceLink): Promise<void> {

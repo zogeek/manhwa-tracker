@@ -1,6 +1,7 @@
-import { and, eq, isNull, sql } from 'drizzle-orm';
+import { and, eq, isNull, notInArray, sql } from 'drizzle-orm';
 import type { DbClient } from '../../shared/db/index.js';
 import {
+  chapterReleaseGroups,
   chapters,
   manhwaCovers,
   manhwaSources,
@@ -37,6 +38,17 @@ export type ManhwaSourceLink = {
   latestChapter: number | null;
 };
 
+/** Team à rattacher : identifiée par son id fournisseur si connu, sinon par son nom. */
+export type TeamInput = {
+  name: string | null;
+  websiteUrl: string | null;
+  /** Fournisseur qui la connaît sous `externalId` (ex. 'mangadex') ; `null` pour le scraper (nom seul). */
+  provider: string | null;
+  externalId: string | null;
+};
+
+export type UpsertedRelease = { id: string; created: boolean };
+
 export interface IngestionRepository {
   /** Sérialise les requêtes portant la même clé d'idempotence (verrou libéré au COMMIT/ROLLBACK). */
   lockIdempotencyKey(key: string): Promise<void>;
@@ -50,9 +62,19 @@ export interface IngestionRepository {
   /** `true` si la couverture était nouvelle. */
   addCover(manhwaId: string, imageUrl: string): Promise<boolean>;
   upsertChapter(manhwaId: string, item: IngestChapterItem): Promise<{ id: string; created: boolean }>;
-  upsertScanlationGroup(name: string): Promise<string>;
-  /** `true` si la parution a été créée, `false` si elle existait déjà (rafraîchie). */
-  upsertRelease(data: NewChapterRelease): Promise<boolean>;
+  /**
+   * Upsert idempotent d'une team : retrouvée par son id fournisseur, sinon par son nom normalisé,
+   * sinon créée. Jamais de doublon (« Asura Scans » reste une seule ligne, quel que soit le nombre
+   * de chapitres). `null` si elle ne peut être identifiée (id inconnu ET nom absent).
+   */
+  upsertTeam(team: TeamInput): Promise<string | null>;
+  /** Crée ou rafraîchit la parution (clé : source + URL). */
+  upsertRelease(data: NewChapterRelease): Promise<UpsertedRelease>;
+  /**
+   * Aligne les teams créditées d'une parution sur la source (ordre = position). Une liste vide ne
+   * change rien : une source qui ne précise pas les teams n'efface pas celles déjà connues.
+   */
+  setReleaseTeams(releaseId: string, teamIds: readonly string[]): Promise<void>;
   linkManhwaSource(link: ManhwaSourceLink): Promise<void>;
   insertRun(data: NewScrapeRun): Promise<ScrapeRun>;
   findRun(id: string): Promise<ScrapeRun | null>;
@@ -166,16 +188,55 @@ export class DrizzleIngestionRepository implements IngestionRepository {
     return { id: firstOrThrow(existing).id, created: false };
   }
 
-  async upsertScanlationGroup(name: string): Promise<string> {
+  async upsertTeam({ name, websiteUrl, provider, externalId }: TeamInput): Promise<string | null> {
+    // 1. Par identifiant fournisseur : résiste aux changements de nom de la team.
+    if (provider && externalId) {
+      const known = await this.db
+        .select({ id: scanlationGroups.id })
+        .from(scanlationGroups)
+        .where(and(eq(scanlationGroups.provider, provider), eq(scanlationGroups.externalId, externalId)))
+        .limit(1);
+      const found = firstOrNull(known);
+      if (found) return found.id;
+    }
+    if (!name) return null;
+
+    // 2. Par nom normalisé (upsert sur l'index unique `slug`) : la team connue sous ce nom est
+    //    réutilisée, et reçoit l'identifiant fournisseur si elle n'en avait pas encore.
+    const withIdentity = provider && externalId ? { provider, externalId } : {};
     const rows = await this.db
       .insert(scanlationGroups)
-      .values({ slug: slugify(name, 'group'), name })
-      .onConflictDoUpdate({ target: scanlationGroups.slug, set: { updatedAt: new Date() } })
+      .values({ slug: slugify(name, 'group'), name, websiteUrl, ...withIdentity })
+      .onConflictDoUpdate({
+        target: scanlationGroups.slug,
+        set: {
+          updatedAt: new Date(),
+          websiteUrl: sql`COALESCE(${scanlationGroups.websiteUrl}, excluded.website_url)`,
+          // Fournisseur et id vont toujours de pair (contrainte CHECK) : on complète les deux ou aucun.
+          provider: sql`COALESCE(${scanlationGroups.provider}, excluded.provider)`,
+          externalId: sql`CASE WHEN ${scanlationGroups.provider} IS NULL THEN excluded.external_id ELSE ${scanlationGroups.externalId} END`,
+        },
+      })
       .returning({ id: scanlationGroups.id });
     return firstOrThrow(rows).id;
   }
 
-  async upsertRelease(data: NewChapterRelease): Promise<boolean> {
+  async setReleaseTeams(releaseId: string, teamIds: readonly string[]): Promise<void> {
+    const ordered = [...new Set(teamIds)];
+    if (ordered.length === 0) return;
+    await this.db
+      .delete(chapterReleaseGroups)
+      .where(and(eq(chapterReleaseGroups.releaseId, releaseId), notInArray(chapterReleaseGroups.groupId, ordered)));
+    await this.db
+      .insert(chapterReleaseGroups)
+      .values(ordered.map((groupId, position) => ({ releaseId, groupId, position })))
+      .onConflictDoUpdate({
+        target: [chapterReleaseGroups.releaseId, chapterReleaseGroups.groupId],
+        set: { position: sql`excluded.position` },
+      });
+  }
+
+  async upsertRelease(data: NewChapterRelease): Promise<UpsertedRelease> {
     const rows = await this.db
       .insert(chapterReleases)
       .values(data)
@@ -184,13 +245,13 @@ export class DrizzleIngestionRepository implements IngestionRepository {
         set: {
           lastSeenAt: new Date(),
           removedAt: null, // réapparue sur la source
-          scanlationGroupId: sql`COALESCE(excluded.scanlation_group_id, ${chapterReleases.scanlationGroupId})`,
           publishedAt: sql`COALESCE(${chapterReleases.publishedAt}, excluded.published_at)`,
         },
       })
       // xmax = 0 ⇔ la ligne vient d'être insérée (et non mise à jour par ON CONFLICT).
-      .returning({ inserted: sql<boolean>`(xmax = 0)` });
-    return firstOrThrow(rows).inserted;
+      .returning({ id: chapterReleases.id, inserted: sql<boolean>`(xmax = 0)` });
+    const { id, inserted } = firstOrThrow(rows);
+    return { id, created: inserted };
   }
 
   async linkManhwaSource({ manhwaId, sourceId, manhwaUrl, latestChapter }: ManhwaSourceLink): Promise<void> {

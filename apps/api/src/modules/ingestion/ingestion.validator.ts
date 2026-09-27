@@ -61,7 +61,10 @@ const chapterItemSchema = createInsertSchema(chapterReleases, {
     number: chapterNumberSchema,
     title: z.string().trim().max(500).nullish(),
     kind: z.enum(chapterKindEnum.enumValues).optional(),
+    /** Team unique (forme historique du contrat, toujours acceptée). */
     scanlationGroup: z.string().trim().min(1).max(100).nullish(),
+    /** Teams créditées, dans l'ordre (collaboration) ; combinées avec `scanlationGroup` si les deux sont fournis. */
+    scanlationGroups: z.array(z.string().trim().min(1).max(100)).max(5).optional(),
   });
 
 const manhwaItemSchema = createInsertSchema(manhwas, {
