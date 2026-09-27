@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 
 from selectolax.lexbor import LexborNode
 
-from ..models import ManhwaStatus, ManhwaType
+from ..contract import ManhwaStatus, ManhwaType
 
 PARIS = ZoneInfo("Europe/Paris")
 
@@ -17,16 +17,16 @@ _BARE_NUMBER_RE = re.compile(r"(\d+(?:[.,]\d{1,2})?)")
 
 # Libellés FR/EN rencontrés sur les CMS de scantrad → valeurs de l'enum `manhwa_status` de l'API.
 _STATUSES: tuple[tuple[tuple[str, ...], ManhwaStatus], ...] = (
-    (("en cours", "ongoing", "publishing", "releasing"), "ongoing"),
-    (("termin", "complet", "completed", "fini", "finished"), "completed"),
-    (("pause", "hiatus", "suspendu"), "hiatus"),
-    (("abandon", "annul", "dropped", "cancel", "arrêt"), "cancelled"),
+    (("en cours", "ongoing", "publishing", "releasing"), ManhwaStatus.ongoing),
+    (("termin", "complet", "completed", "fini", "finished"), ManhwaStatus.completed),
+    (("pause", "hiatus", "suspendu"), ManhwaStatus.hiatus),
+    (("abandon", "annul", "dropped", "cancel", "arrêt"), ManhwaStatus.cancelled),
 )
 _TYPES: tuple[tuple[tuple[str, ...], ManhwaType], ...] = (
-    (("webtoon",), "webtoon"),
-    (("manhwa",), "manhwa"),
-    (("manhua",), "manhua"),
-    (("manga",), "manga"),
+    (("webtoon",), ManhwaType.webtoon),
+    (("manhwa",), ManhwaType.manhwa),
+    (("manhua",), ManhwaType.manhua),
+    (("manga",), ManhwaType.manga),
 )
 
 _FR_MONTHS = {

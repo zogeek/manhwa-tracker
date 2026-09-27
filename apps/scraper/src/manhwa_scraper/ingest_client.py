@@ -15,16 +15,8 @@ from uuid import UUID
 import httpx
 from tenacity import AsyncRetrying, retry_if_exception, stop_after_attempt, wait_random_exponential
 
-from .models import (
-    BatchResult,
-    HealthResult,
-    HealthSample,
-    IngestBatch,
-    ResponseModel,
-    RunOutcome,
-    ScrapeRun,
-    to_payload,
-)
+from .contract import FinishRun, HealthSample, IngestBatch, RecordHealth, RunOutcome, StartRun
+from .models import BatchResult, HealthResult, ResponseModel, ScrapeRun, to_payload
 
 INGEST_PREFIX = "/api/ingest"
 _TRANSIENT_STATUSES = frozenset({408, 429, 500, 502, 503, 504})
@@ -81,10 +73,8 @@ class IngestClient:
         self._sleep = sleep
 
     async def start_run(self, source_id: UUID, worker_version: str | None = None) -> ScrapeRun:
-        body: dict[str, object] = {"sourceId": str(source_id)}
-        if worker_version is not None:
-            body["workerVersion"] = worker_version
-        return await self._send("POST", "/runs", body, ScrapeRun, idempotent=False)
+        body = StartRun(source_id=source_id, worker_version=worker_version)
+        return await self._send("POST", "/runs", to_payload(body), ScrapeRun, idempotent=False)
 
     async def finish_run(
         self,
@@ -94,12 +84,13 @@ class IngestClient:
         stats: Mapping[str, int] | None = None,
         error: str | None = None,
     ) -> ScrapeRun:
-        body: dict[str, object] = {"status": status}
-        if stats is not None:
-            body["stats"] = dict(stats)
-        if error is not None:
-            body["error"] = error[:10_000]
-        return await self._send("PATCH", f"/runs/{run_id}", body, ScrapeRun, idempotent=True)
+        # Erreur tronquée plutôt que rejetée : une trace trop longue ne doit pas empêcher de clore le run.
+        body = FinishRun(
+            status=status,
+            stats=dict(stats) if stats is not None else None,
+            error=error[:10_000] if error is not None else None,
+        )
+        return await self._send("PATCH", f"/runs/{run_id}", to_payload(body), ScrapeRun, idempotent=True)
 
     async def send_batch(self, batch: IngestBatch, idempotency_key: str) -> BatchResult:
         """Envoie un lot. La même clé est rejouée à chaque tentative : un timeout ne crée pas de doublon."""
@@ -113,8 +104,8 @@ class IngestClient:
         )
 
     async def record_health(self, samples: list[HealthSample]) -> HealthResult:
-        body: dict[str, object] = {"samples": [to_payload(sample) for sample in samples]}
-        return await self._send("POST", "/health", body, HealthResult, idempotent=False)
+        body = RecordHealth(samples=samples)
+        return await self._send("POST", "/health", to_payload(body), HealthResult, idempotent=False)
 
     async def _send[T: ResponseModel](
         self,

@@ -10,7 +10,7 @@ from typing import ClassVar
 
 from selectolax.lexbor import LexborHTMLParser
 
-from ...models import ScrapedChapter, SeriesMetadata
+from ...contract import IngestChapter, IngestManhwa
 from ..base import ExtractionError, SourceExtractor
 from ..parsing import absolute_url, clean_text, image_url, parse_chapter_number, parse_date, parse_status, parse_type
 
@@ -46,11 +46,11 @@ class MangaThemesiaExtractor(SourceExtractor, ABC):
                 urls[absolute_url(page_url, href)] = None
         return list(urls)
 
-    def parse_series(self, document: LexborHTMLParser, series_url: str) -> SeriesMetadata:
+    def parse_series(self, document: LexborHTMLParser, series_url: str) -> IngestManhwa:
         title = clean_text(document.css_first(self.selectors.title))
         if title is None:
             raise ExtractionError(f"Titre introuvable ({self.selectors.title}) sur {series_url}")
-        return SeriesMetadata(
+        return IngestManhwa(
             source_manhwa_url=series_url,
             title=title,
             synopsis=clean_text(document.css_first(self.selectors.synopsis)),
@@ -59,8 +59,8 @@ class MangaThemesiaExtractor(SourceExtractor, ABC):
             type=parse_type(self._info_value(document, "type")),
         )
 
-    def parse_chapters(self, document: LexborHTMLParser, series_url: str) -> list[ScrapedChapter]:
-        chapters: list[ScrapedChapter] = []
+    def parse_chapters(self, document: LexborHTMLParser, series_url: str) -> list[IngestChapter]:
+        chapters: list[IngestChapter] = []
         for item in document.css(self.selectors.chapter_item):
             link = item.css_first(self.selectors.chapter_link)
             href = link.attributes.get("href") if link is not None else None
@@ -72,7 +72,7 @@ class MangaThemesiaExtractor(SourceExtractor, ABC):
                 logger.debug("Chapitre ignoré (lien ou numéro absent) sur %s : %r", series_url, label)
                 continue
             chapters.append(
-                ScrapedChapter(
+                IngestChapter(
                     number=number,
                     url=absolute_url(series_url, href),
                     language=self.language,

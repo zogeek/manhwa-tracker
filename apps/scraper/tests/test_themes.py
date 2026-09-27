@@ -1,5 +1,4 @@
 from datetime import datetime
-from decimal import Decimal
 from typing import ClassVar
 
 import pytest
@@ -42,7 +41,7 @@ class TestMadara:
         assert manhwa.synopsis == "Un nécromancien revient."
         assert (manhwa.type, manhwa.status) == ("manhwa", "ongoing")
         # « Annonce » n'a pas de numéro : ignorée plutôt que de faire échouer toute la fiche.
-        assert [(c.number, c.title) for c in manhwa.chapters] == [(Decimal("12.5"), "Le retour"), (Decimal(12), None)]
+        assert [(c.number, c.title) for c in manhwa.chapters] == [(12.5, "Le retour"), (12.0, None)]
         assert str(manhwa.chapters[1].url) == "https://scan.test/manga/necro/chapitre-12/"
         assert manhwa.chapters[1].published_at == datetime(2025, 1, 12, tzinfo=PARIS)
         assert manhwa.chapters[0].published_at is not None  # « il y a 3 heures » lu dans le badge NEW
@@ -55,7 +54,7 @@ class TestMadara:
 
         manhwa = await DemoMadara(fetcher).scrape_series(SOLO)
 
-        assert [c.number for c in manhwa.chapters] == [Decimal(2), Decimal(1)]
+        assert [c.number for c in manhwa.chapters] == [2.0, 1.0]
         ajax_call = fetcher.calls[1]
         assert ajax_call.method == "POST"
         assert ajax_call.headers is not None
@@ -77,6 +76,14 @@ class TestMadara:
         assert urls == [NECRO, SOLO]
         assert len(fetcher.calls) == 2
 
+    async def test_discover_stops_when_the_next_catalog_page_is_a_404(self) -> None:
+        fetcher = FakeFetcher()  # page 2 absente → 404, comme WordPress après la dernière page
+        fetcher.add("https://scan.test/manga/?m_orderby=latest", fixture("madara_catalog.html"))
+
+        urls = [url async for url in DemoMadara(fetcher).discover()]
+
+        assert urls == [NECRO, SOLO]
+
 
 class TestMangaThemesia:
     async def test_scrapes_series(self) -> None:
@@ -89,7 +96,7 @@ class TestMangaThemesia:
         assert manhwa.title == "Omniscient Reader"
         assert (manhwa.type, manhwa.status) == ("manhwa", "completed")
         assert manhwa.synopsis == "La fin du monde."
-        assert [c.number for c in manhwa.chapters] == [Decimal(551), Decimal(550)]
+        assert [c.number for c in manhwa.chapters] == [551.0, 550.0]
         assert str(manhwa.chapters[1].url) == "https://scan.test/omniscient-chapitre-550/"
         assert manhwa.chapters[0].published_at == datetime(2025, 2, 3, tzinfo=PARIS)
 

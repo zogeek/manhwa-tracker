@@ -8,7 +8,7 @@ from typing import ClassVar
 
 from selectolax.lexbor import LexborHTMLParser
 
-from ...models import ScrapedChapter, SeriesMetadata
+from ...contract import IngestChapter, IngestManhwa
 from ..base import SourceExtractor
 
 
@@ -23,8 +23,8 @@ class RimuScanExtractor(SourceExtractor):
     def parse_catalog_page(self, document: LexborHTMLParser, page_url: str) -> list[str]:
         raise NotImplementedError(f"{self.slug} : liens des fiches du catalogue à implémenter")
 
-    def parse_series(self, document: LexborHTMLParser, series_url: str) -> SeriesMetadata:
+    def parse_series(self, document: LexborHTMLParser, series_url: str) -> IngestManhwa:
         raise NotImplementedError(f"{self.slug} : lecture de la fiche à implémenter")
 
-    def parse_chapters(self, document: LexborHTMLParser, series_url: str) -> list[ScrapedChapter]:
+    def parse_chapters(self, document: LexborHTMLParser, series_url: str) -> list[IngestChapter]:
         raise NotImplementedError(f"{self.slug} : liste des chapitres à implémenter")

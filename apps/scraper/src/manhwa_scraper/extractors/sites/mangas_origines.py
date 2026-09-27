@@ -1,14 +1,18 @@
 """mangas-origines.fr — Madara avec un thème enfant (`child-origines`).
 
 Relevé du 2026-09-27 : l'étage HTTP (curl_cffi) suffit, pas de challenge JavaScript.
-Les fiches vivent sous `/oeuvre/<slug>/`. Le titre suit le sélecteur Madara standard, mais la liste
-des chapitres est remplacée par un composant maison (`.ori-chl`, chargé par `ajax/chapters/`) :
-surcharger `selectors.chapter_item` / `chapter_link` avant de passer `ready` à `True`.
+- Catalogue : Madara standard (`/oeuvre/page/N/`, 16 fiches par page, 404 après la dernière).
+- Fiche : mise en page maison `ori-sr-*` ; statut et type dans une liste `<dl>` (`<dt>` libellé / `<dd>` valeur).
+- Chapitres : composant maison `ori-chl-*`, déjà complet dans la fiche (pas d'appel AJAX).
+  Numéro dans `data-num` (gère 179.5), date complète dans `title` (le texte affiche « 21/06/23 »).
 """
 
 from typing import ClassVar
 
-from ..themes import MadaraExtractor
+from selectolax.lexbor import LexborHTMLParser
+
+from ..parsing import clean_text
+from ..themes import MadaraExtractor, MadaraSelectors
 
 
 class MangasOriginesExtractor(MadaraExtractor):
@@ -16,4 +20,26 @@ class MangasOriginesExtractor(MadaraExtractor):
     name: ClassVar[str] = "Mangas Origines"
     base_url: ClassVar[str] = "https://mangas-origines.fr/"
     series_path: ClassVar[str] = "oeuvre"
-    # TODO(selectors) : selectors = replace(MadaraSelectors(), chapter_item="…", chapter_link="…")
+    ready: ClassVar[bool] = True
+    selectors: ClassVar[MadaraSelectors] = MadaraSelectors(
+        title=".ori-sr-title",
+        cover=".ori-sr-cover img",
+        synopsis=".ori-sr-syn-texte",
+        chapter_item=".ori-chl-row",
+        chapter_link="a.ori-chl-corps",
+        chapter_label=".ori-chl-nom-long",
+        chapter_number_attr="data-num",
+        chapter_date=".ori-chl-date",
+        chapter_date_attr="title",
+    )
+
+    def parse_info_table(self, document: LexborHTMLParser) -> dict[str, str]:
+        info: dict[str, str] = {}
+        label: str | None = None
+        for node in document.css(".ori-sr-infos dl > dt, .ori-sr-infos dl > dd"):
+            if node.tag == "dt":
+                label = clean_text(node)
+            elif label is not None and (value := clean_text(node)):
+                info[label.lower()] = value
+                label = None
+        return info

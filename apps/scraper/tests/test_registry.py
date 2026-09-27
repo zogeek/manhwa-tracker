@@ -27,8 +27,8 @@ def test_every_source_is_concrete_and_well_formed(extractor: type[SourceExtracto
     assert instance.handles(instance.base_url)
 
 
-def test_skeletons_are_not_ready_to_run() -> None:
-    assert [extractor.slug for extractor in ALL_SOURCES if extractor.ready] == []
+def test_only_validated_sources_are_ready_to_run() -> None:
+    assert [extractor.slug for extractor in ALL_SOURCES if extractor.ready] == ["mangas-origines"]
 
 
 def test_resolves_a_source_from_any_of_its_urls() -> None:

@@ -52,7 +52,7 @@ manhwa-tracker/
 ├── apps/
 │   ├── api/              ← Backend Hono + Drizzle + Better Auth (✅ socle sécurisé, testé)
 │   ├── web/              ← Frontend Next.js (✅ branché : proxy, auth, dashboard typé)
-│   └── scraper/          ← Worker Python (🟡 socle livré : fetchers anti-bot, thèmes Madara/MangaThemesia, 4 squelettes)
+│   └── scraper/          ← Worker Python (🟡 1ʳᵉ source prête : mangas-origines ; contrat généré depuis Zod)
 ├── packages/             ← Packages partagés (vide)
 ├── CLAUDE.md             ← Règles d'architecture, SOP Git, stratégie de tests
 ├── docker-compose.yml    ← PostgreSQL 16 local (port 5431)
@@ -180,11 +180,11 @@ Worker Python isolé qui pousse ses données vers l'API Hono (`/api/ingest/*`, c
 |---|---|
 | Projet uv (Python 3.13), scripts Turborepo (`dev`, `lint`, `typecheck`, `test`), pytest + mypy strict en CI, CodeQL Python | ✅ |
 | Récupération à deux étages : curl_cffi (empreinte TLS Chrome) puis Camoufox (navigateur anti-détection piloté par Playwright), escalade mémorisée par site, débit limité par site | ✅ vérifié en réel sur les 4 sites cibles |
-| Contrat Pydantic calqué sur le validateur Zod de l'ingestion ; client API avec ré-essais sûrs (idempotence) | ✅ |
+| Contrat **généré** : Zod → JSON Schema (`apps/api/contracts/`) → Pydantic (`contract.py`), `pnpm contract:generate`, tests anti-dérive des deux côtés ; client API avec ré-essais sûrs (idempotence) | ✅ |
 | `ScrapeRunner` : lots, `scrape_runs` (succeeded / partial / failed), `source_health` (up / degraded / blocked) | ✅ |
 | Thèmes Madara et MangaThemesia (extracteurs complets, testés sur fixtures synthétiques) | ✅ |
-| Sources astral-manga, scan-manga, mangas-origines, rimuscan | 🟡 squelettes (`ready = False`) |
-| Contrat généré depuis Zod (`z.toJSONSchema()` → modèles Pydantic) au lieu d'une copie manuelle | ❌ validé, à faire |
+| mangas-origines | ✅ prêt : catalogue, fiche (thème enfant `ori-*`), chapitres dans la fiche ; essai réel de bout en bout vers l'API |
+| Sources astral-manga, scan-manga, rimuscan | 🟡 squelettes (`ready = False`) |
 | Planification des runs, résolution automatique du `source_id` | ❌ |
 
 ---
@@ -216,6 +216,7 @@ Worker Python isolé qui pousse ses données vers l'API Hono (`/api/ingest/*`, c
 - Progression avancée : saisie directe du chapitre, « Lu jusqu'ici » (mise à jour absolue, sans faux historique), « Annuler », bibliothèque en onglets ; l'API passe une série « à lire » en « en cours » dès qu'on saisit un chapitre
 - CI GitHub Actions (PR vers `dev`/`master` : lint → typecheck → tests Vitest → build ; migrations sur Postgres 16 éphémère + drift check), CodeQL JavaScript/TypeScript (`security-extended`, hebdomadaire) et template de PR
 - Scraper : socle Python (voir §5), intégré à la CI (pytest, mypy, Ruff) et à CodeQL
+- Contrat d'ingestion en source unique : Zod → JSON Schema → Pydantic généré, tests anti-dérive ; première source opérationnelle (mangas-origines)
 
 ### 🔴 Priorité suivante — Sécurité & robustesse API
 
@@ -234,7 +235,7 @@ Playwright (E2E), tags de genre sur les cartes (embarquer les termes dans `GET /
 
 ### 🟤 Scraper
 
-Contrat généré depuis Zod (JSON Schema → Pydantic), première source prête (mangas-origines : cibler la liste de chapitres du thème enfant), sources Next.js via leurs données JSON embarquées, planification des runs, `source_id` résolu depuis l'API.
+Sources Next.js (astral-manga, rimuscan) via leurs données JSON embarquées, planification des runs, `source_id` résolu depuis l'API.
 
 ### 🔵 Évolutions DB proposées (non validées)
 

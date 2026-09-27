@@ -1,0 +1,386 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Contrat de /api/ingest/*. Généré par `pnpm contract:generate` (racine du repo), ne pas éditer.",
+  "$ref": "#/$defs/IngestBatch",
+  "$defs": {
+    "ChapterKind": {
+      "type": "string",
+      "enum": [
+        "regular",
+        "extra",
+        "side_story",
+        "prologue",
+        "epilogue",
+        "notice"
+      ]
+    },
+    "ChapterQuality": {
+      "type": "string",
+      "enum": [
+        "hd",
+        "sd",
+        "raw"
+      ]
+    },
+    "FinishRun": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "$ref": "#/$defs/RunOutcome"
+        },
+        "stats": {
+          "anyOf": [
+            {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 10000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "status"
+      ]
+    },
+    "HealthSample": {
+      "type": "object",
+      "properties": {
+        "sourceId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "scrapeRunId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "$ref": "#/$defs/HealthStatus"
+        },
+        "httpStatus": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 100,
+              "maximum": 599
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "latencyMs": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 600000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "blockedBy": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 50
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "checkedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "sourceId",
+        "status"
+      ]
+    },
+    "HealthStatus": {
+      "type": "string",
+      "enum": [
+        "up",
+        "degraded",
+        "blocked",
+        "down"
+      ]
+    },
+    "IngestBatch": {
+      "type": "object",
+      "properties": {
+        "sourceId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "scrapeRunId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "manhwas": {
+          "minItems": 1,
+          "maxItems": 100,
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/IngestManhwa"
+          }
+        }
+      },
+      "required": [
+        "sourceId",
+        "manhwas"
+      ]
+    },
+    "IngestChapter": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "language": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 10
+        },
+        "quality": {
+          "$ref": "#/$defs/ChapterQuality"
+        },
+        "publishedAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "number": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 999999.99,
+          "multipleOf": 0.01
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 500
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/ChapterKind"
+        },
+        "scanlationGroup": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scanlationGroups": {
+          "maxItems": 5,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          }
+        }
+      },
+      "required": [
+        "url",
+        "language",
+        "number"
+      ]
+    },
+    "IngestManhwa": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "originalTitle": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 500
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "synopsis": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 10000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "coverUrl": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uri"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "type": {
+          "$ref": "#/$defs/ManhwaType"
+        },
+        "status": {
+          "$ref": "#/$defs/ManhwaStatus"
+        },
+        "totalChapters": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sourceManhwaUrl": {
+          "type": "string",
+          "format": "uri"
+        },
+        "manhwaId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "chapters": {
+          "maxItems": 2000,
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/IngestChapter"
+          },
+          "default": []
+        }
+      },
+      "required": [
+        "title",
+        "sourceManhwaUrl"
+      ]
+    },
+    "ManhwaStatus": {
+      "type": "string",
+      "enum": [
+        "ongoing",
+        "completed",
+        "hiatus",
+        "cancelled"
+      ]
+    },
+    "ManhwaType": {
+      "type": "string",
+      "enum": [
+        "manga",
+        "manhwa",
+        "manhua",
+        "webtoon"
+      ]
+    },
+    "RecordHealth": {
+      "type": "object",
+      "properties": {
+        "samples": {
+          "minItems": 1,
+          "maxItems": 500,
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HealthSample"
+          }
+        }
+      },
+      "required": [
+        "samples"
+      ]
+    },
+    "RunOutcome": {
+      "type": "string",
+      "enum": [
+        "succeeded",
+        "partial",
+        "failed"
+      ]
+    },
+    "StartRun": {
+      "type": "object",
+      "properties": {
+        "sourceId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "workerVersion": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 50
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "sourceId"
+      ]
+    }
+  }
+}
