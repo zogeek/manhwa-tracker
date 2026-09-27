@@ -22,11 +22,6 @@ import {
 
 export type DiscoveryRepositories = { discovery: DiscoveryRepository; jobs: JobQueue };
 
-export type DiscoveryOptions = {
-  /** Fournisseurs dont le flux de chapitres est branché : un import depuis l'un d'eux déclenche `chapters.sync`. */
-  chapterFeeds: readonly ExternalProvider[];
-};
-
 /** Vocabulaires de la taxonomie alimentés par l'import (créés à la volée s'ils manquent). */
 export const IMPORT_VOCABULARIES = {
   genres: { slug: 'genre', name: 'Genres' },
@@ -70,17 +65,12 @@ const allRefs = (item: ExternalManhwa): ExternalRef[] => [selfRef(item), ...item
  * il itère sur les stratégies qu'on lui injecte.
  */
 export class DiscoveryService {
-  private readonly chapterFeeds: ReadonlySet<ExternalProvider>;
-
   constructor(
     private readonly manhwas: Pick<ManhwaRepository, 'search' | 'findById'>,
     private readonly repo: DiscoveryRepository,
     private readonly providers: readonly ExternalCatalogProvider[],
     private readonly transactions: TransactionRunner<DiscoveryRepositories>,
-    options: DiscoveryOptions,
-  ) {
-    this.chapterFeeds = new Set(options.chapterFeeds);
-  }
+  ) {}
 
   async search({ q, limit, external, providers }: CatalogSearchQuery): Promise<CatalogSearchResult> {
     const local = await this.manhwas.search(q, limit);
@@ -134,9 +124,11 @@ export class DiscoveryService {
       if (sibling) {
         if (sibling.deleted) return { ...sibling, created: false };
         // Même œuvre, autre fournisseur : on complète la fiche existante au lieu d'en créer une seconde.
-        const selfLinked = (await discovery.linkExternalRefs(sibling.manhwaId, [selfRef(item)])) > 0;
-        await discovery.linkExternalRefs(sibling.manhwaId, item.crossReferences);
-        if (selfLinked) await jobs.enqueue(this.followUpJobs(sibling.manhwaId, item, { mirrorCover: false }));
+        const linked =
+          (await discovery.linkExternalRefs(sibling.manhwaId, [selfRef(item)])) +
+          (await discovery.linkExternalRefs(sibling.manhwaId, item.crossReferences));
+        // De nouveaux liens peuvent ouvrir l'accès à un flux de chapitres : on redemande une synchronisation.
+        if (linked > 0) await jobs.enqueue(this.followUpJobs(sibling.manhwaId, item, { mirrorCover: false }));
         return { ...sibling, created: false };
       }
 
@@ -163,7 +155,11 @@ export class DiscoveryService {
     return null;
   }
 
-  /** Travail asynchrone déclenché par un import (dédoublonné : jamais deux fois la même tâche en attente). */
+  /**
+   * Travail asynchrone déclenché par un import (dédoublonné : jamais deux fois la même tâche en attente).
+   * `chapters.sync` est demandée pour TOUTE œuvre, sans savoir qui fournit des chapitres : c'est la
+   * tâche qui choisit ses sources parmi les liens de l'œuvre (aucun couplage import ↔ fournisseur).
+   */
   private followUpJobs(manhwaId: string, item: ExternalManhwa, { mirrorCover }: { mirrorCover: boolean }): JobRequest[] {
     const requests: JobRequest[] = [];
     if (mirrorCover && item.coverUrl) {
@@ -173,13 +169,7 @@ export class DiscoveryService {
         dedupeKey: `cover.mirror:${manhwaId}:${item.coverUrl}`,
       });
     }
-    if (this.chapterFeeds.has(item.provider)) {
-      requests.push({
-        type: 'chapters.sync',
-        payload: { manhwaId, provider: item.provider, externalId: item.externalId },
-        dedupeKey: `chapters.sync:${manhwaId}:${item.provider}`,
-      });
-    }
+    requests.push({ type: 'chapters.sync', payload: { manhwaId }, dedupeKey: `chapters.sync:${manhwaId}` });
     return requests;
   }
 

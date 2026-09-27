@@ -451,17 +451,20 @@ describe('POST /manhwas/import — Kitsu (third provider, zero change in the ser
   const importTbateFromKitsu = (user: TestUser) =>
     manhwas.import.$post({ json: { provider: 'kitsu', externalId: TBATE_KITSU_ID } }, { headers: user.headers });
 
-  it('imports a Kitsu work with its taxonomy and queues the cover mirror', async () => {
+  it('imports a Kitsu work, mirrors its cover and ends its chapter sync cleanly without any chapter feed', async () => {
     const res = await importTbateFromKitsu(reader);
 
     expect(res.status).toBe(201);
     const { data: manhwa } = await res.json();
     expect(manhwa).toMatchObject({ title: 'The Beginning After the End', type: 'manhwa', rating: 8.4, startDate: '2018-07-17' });
     expect(await termSlugsOf(manhwa.id)).toEqual(['genre:action', 'genre:fantasy', 'theme:magic', 'theme:reincarnation']);
-    // Kitsu n'a pas de flux de chapitres branché : seule la couverture part en tâche de fond.
-    expect((await context.db.select().from(jobs)).map((job) => job.type)).toEqual(['cover.mirror']);
+    // La synchronisation est demandée sans savoir qui fournit des chapitres…
+    expect((await context.db.select().from(jobs)).map((job) => job.type).sort()).toEqual(['chapters.sync', 'cover.mirror']);
 
-    expect(await context.worker.runOnce()).toBe(1);
+    expect(await context.worker.runOnce()).toBe(2);
+    // … et se termine sans erreur : ni Kitsu ni AniList (lien croisé) ne listent de chapitres.
+    expect((await context.db.select().from(jobs)).map((job) => job.status)).toEqual(['succeeded', 'succeeded']);
+    expect(await context.db.select().from(chapters).where(eq(chapters.manhwaId, manhwa.id))).toEqual([]);
     const cover = firstOrThrow(await context.db.select().from(manhwaCovers).where(eq(manhwaCovers.manhwaId, manhwa.id)));
     expect(cover).toMatchObject({ source: 'kitsu', storageKey: expect.stringMatching(/\.png$/) });
   });
@@ -475,5 +478,23 @@ describe('POST /manhwas/import — Kitsu (third provider, zero change in the ser
     expect((await res.json()).data.id).toBe(fromMangaDex.id);
     const links = await context.db.select().from(externalLinks).where(eq(externalLinks.manhwaId, fromMangaDex.id));
     expect(links.map((link) => link.provider).sort()).toEqual(['anilist', 'kitsu', 'mangadex']);
+  });
+});
+
+describe('chapter sync is provider-agnostic (driven by the work links)', () => {
+  it('fetches MangaDex chapters for a work imported from AniList as soon as it gets a MangaDex link', async () => {
+    const { data: fromAniList } = await (await importTbate(reader)).json();
+    await context.worker.runOnce();
+    // Importée depuis AniList : aucun flux de chapitres lié, la synchronisation n'a rien trouvé.
+    expect(await context.db.select().from(chapters).where(eq(chapters.manhwaId, fromAniList.id))).toEqual([]);
+
+    // Le même titre importé depuis MangaDex se rattache à la fiche AniList (référence croisée)…
+    expect((await importTbateFromMangaDex(admin)).status).toBe(200);
+    await context.worker.runOnce();
+
+    // … et la synchronisation suivante trouve le lien MangaDex : chapitres de la fiche AniList.
+    const synced = await context.db.select().from(chapters).where(eq(chapters.manhwaId, fromAniList.id));
+    expect(synced.map((chapter) => chapter.number).sort()).toEqual([1, 2]);
+    expect(upstream.calls.some((call) => call.url.pathname === `/manga/${TBATE_MANGADEX_ID}/feed`)).toBe(true);
   });
 });

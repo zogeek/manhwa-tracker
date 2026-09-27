@@ -146,7 +146,6 @@ export function createContainer({ db, auth, integrations, jobs }: ContainerOptio
         new DrizzleDiscoveryRepository(db),
         integrations.discoveryProviders.map((name) => catalogs[name]),
         discoveryTransactions,
-        { chapterFeeds: chapterFeeds.map((feed) => feed.name) },
       ),
       images: imageProxy,
       media: new MediaService(mediaStorage),
