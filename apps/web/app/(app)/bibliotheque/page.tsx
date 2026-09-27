@@ -1,37 +1,42 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { LibraryEntryControls } from "@/components/library/library-entry-controls";
+import { LibraryTabs } from "@/components/library/library-tabs";
 import { ManhwaCard } from "@/components/manhwa/manhwa-card";
 import { api } from "@/app/lib/api";
 import { getForwardedAuthHeaders, verifySession } from "@/app/lib/dal";
-import { READING_STATUS_LABELS, READING_STATUSES } from "@/app/lib/labels";
+import { READING_STATUSES } from "@/app/lib/labels";
+import { ALL_TAB, type LibraryTab } from "@/app/lib/library";
 
 export const metadata: Metadata = { title: "Ma Bibliothèque" };
 
-// Server Component : la bibliothèque est lue au nom de l'utilisateur (cookie relayé à l'API).
-// Chaque carte embarque ses contrôles client ; après une mutation, `router.refresh()` rejoue ce rendu.
-export default async function LibraryPage() {
-  await verifySession();
+type LibraryPageProps = { searchParams: Promise<Record<string, string | string[] | undefined>> };
 
-  const res = await api.reading.progress.$get({}, { headers: await getForwardedAuthHeaders() });
+// Server Component : la bibliothèque est lue au nom de l'utilisateur (cookie relayé à l'API) et
+// chaque carte est rendue ici ; les onglets (client) ne font que choisir lesquelles afficher.
+// Après une mutation (statut, +1), `router.refresh()` rejoue ce rendu : la carte change d'onglet.
+export default async function LibraryPage({ searchParams }: LibraryPageProps) {
+  await verifySession();
+  const [res, params] = await Promise.all([
+    api.reading.progress.$get({}, { headers: await getForwardedAuthHeaders() }),
+    searchParams,
+  ]);
   if (!res.ok) throw new Error(`Bibliothèque indisponible (HTTP ${res.status})`);
   const { data: library } = await res.json();
 
-  // Regroupement par statut, dans l'ordre d'affichage (les groupes vides sont masqués).
-  const groups = READING_STATUSES.map((status) => ({
-    status,
-    entries: library.filter((entry) => entry.status === status),
-  })).filter((group) => group.entries.length > 0);
+  // `?statut=on_hold` : onglet ouvert au chargement (lien partageable) ; toute autre valeur → « Toutes ».
+  const requested = params["statut"];
+  const initialTab: LibraryTab = READING_STATUSES.find((status) => status === requested) ?? ALL_TAB;
 
   return (
     <>
       <header className="space-y-1">
         <h1 className="text-2xl font-semibold tracking-tight">Ma Bibliothèque</h1>
         <p className="text-muted-foreground">
-          {library.length} série{library.length > 1 ? "s" : ""} suivie{library.length > 1 ? "s" : ""}.
+          {library.length} série{library.length > 1 ? "s" : ""} suivie{library.length > 1 ? "s" : ""}. Changez un
+          statut directement depuis une carte ; la saisie du chapitre exact se fait sur la fiche.
         </p>
       </header>
 
@@ -48,21 +53,18 @@ export default async function LibraryPage() {
           </CardContent>
         </Card>
       ) : (
-        groups.map(({ status, entries }) => (
-          <section key={status} className="space-y-3" aria-labelledby={`library-${status}`}>
-            <h2 id={`library-${status}`} className="flex items-center gap-2 text-lg font-semibold">
-              {READING_STATUS_LABELS[status]}
-              <Badge variant="secondary">{entries.length}</Badge>
-            </h2>
-            <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-              {entries.map((entry) => (
-                <ManhwaCard key={entry.id} manhwa={entry.manhwa} href={`/manhwas/${entry.manhwaId}`}>
-                  <LibraryEntryControls entry={entry} />
-                </ManhwaCard>
-              ))}
-            </div>
-          </section>
-        ))
+        <LibraryTabs
+          initialTab={initialTab}
+          items={library.map((entry) => ({
+            key: entry.id,
+            status: entry.status,
+            card: (
+              <ManhwaCard manhwa={entry.manhwa} href={`/manhwas/${entry.manhwaId}`}>
+                <LibraryEntryControls entry={entry} />
+              </ManhwaCard>
+            ),
+          }))}
+        />
       )}
     </>
   );

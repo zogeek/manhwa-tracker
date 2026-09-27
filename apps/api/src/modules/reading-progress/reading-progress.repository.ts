@@ -66,12 +66,25 @@ export class DrizzleReadingProgressRepository implements ReadingProgressReposito
 
   async upsert(userId: string, manhwaId: string, patch: UpdateProgressInput): Promise<ReadingProgress> {
     const { status, currentChapter, rating, notes } = patch;
+    const now = new Date();
+    // Saisir une progression (mise à jour absolue, ex. « j'en suis au 120 ») sur une série « à lire »
+    // la fait passer « en cours », comme une lecture. Un statut fourni explicitement reste prioritaire.
+    const startsReading = status === undefined && currentChapter !== undefined && currentChapter > 0;
 
     // Seuls les champs fournis écrasent l'existant ; `furthestChapter` ne peut jamais reculer.
     const set: PgUpdateSetSource<typeof readingProgress> = {
-      updatedAt: new Date(),
+      updatedAt: now,
       updatedBy: userId,
       ...(status !== undefined ? { status } : {}),
+      ...(startsReading
+        ? {
+            status: sql`CASE WHEN ${readingProgress.status} = 'plan_to_read' THEN 'reading'::reading_status ELSE ${readingProgress.status} END`,
+          }
+        : {}),
+      // Date de début de lecture : posée une seule fois, dès qu'une lecture commence réellement.
+      ...(startsReading || status === 'reading'
+        ? { startedAt: sql`COALESCE(${readingProgress.startedAt}, ${now})` }
+        : {}),
       ...(currentChapter !== undefined
         ? {
             currentChapter,
@@ -87,9 +100,10 @@ export class DrizzleReadingProgressRepository implements ReadingProgressReposito
       .values({
         userId,
         manhwaId,
-        status,
+        status: startsReading ? 'reading' : status,
         currentChapter: currentChapter ?? 0,
         furthestChapter: currentChapter ?? 0,
+        startedAt: startsReading || status === 'reading' ? now : null,
         rating,
         notes,
         updatedBy: userId,

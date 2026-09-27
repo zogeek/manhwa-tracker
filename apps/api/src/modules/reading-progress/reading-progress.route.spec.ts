@@ -118,3 +118,46 @@ describe('PUT /reading/progress/:manhwaId — partial atomic upsert', () => {
     expect(body.data).toMatchObject({ currentChapter: 1, furthestChapter: 3, rating: 9, status: 'completed' });
   });
 });
+
+describe('PUT /reading/progress/:manhwaId — absolute progress (quick edit, "read up to here")', () => {
+  const put = (json: { currentChapter?: number; status?: 'reading' | 'on_hold' | 'plan_to_read' }) =>
+    reading.progress[':manhwaId'].$put({ param: { manhwaId: catalog.manhwa.id }, json }, { headers: reader.headers });
+
+  it('jumps straight to any chapter and starts reading a "plan to read" series', async () => {
+    await put({}); // ajout à la bibliothèque : « à lire », chapitre 0
+    const res = await put({ currentChapter: 120 });
+
+    expect(res.status).toBe(200);
+    const { data } = await res.json();
+    expect(data).toMatchObject({ currentChapter: 120, furthestChapter: 120, status: 'reading' });
+    expect(data.startedAt).not.toBeNull();
+  });
+
+  it('creates the entry as "reading" when the first update already sets a chapter', async () => {
+    const { data } = await (await put({ currentChapter: 42.5 })).json();
+
+    expect(data).toMatchObject({ currentChapter: 42.5, status: 'reading' });
+    expect(data.startedAt).not.toBeNull();
+  });
+
+  it('lets the user correct a typo backwards, keeping the high-water mark and the start date', async () => {
+    const first = (await (await put({ currentChapter: 1200 })).json()).data;
+    const { data } = await (await put({ currentChapter: 120 })).json();
+
+    expect(data).toMatchObject({ currentChapter: 120, furthestChapter: 1200, status: 'reading' });
+    expect(data.startedAt).toBe(first.startedAt);
+  });
+
+  it('keeps an explicit status and does not override a paused series', async () => {
+    expect((await (await put({ currentChapter: 10, status: 'plan_to_read' })).json()).data.status).toBe('plan_to_read');
+
+    await put({ status: 'on_hold' });
+    expect((await (await put({ currentChapter: 11 })).json()).data.status).toBe('on_hold');
+  });
+
+  it('rejects chapter numbers the column cannot store', async () => {
+    const invalid = await Promise.all([put({ currentChapter: -1 }), put({ currentChapter: 1.234 }), put({ currentChapter: 1e7 })]);
+
+    expect(invalid.map((res) => res.status)).toEqual([400, 400, 400]);
+  });
+});

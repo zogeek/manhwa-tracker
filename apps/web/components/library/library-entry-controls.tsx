@@ -3,12 +3,11 @@
 import { useOptimistic } from "react";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { api } from "@/app/lib/api";
-import type { LibraryEntry, ProgressPatch } from "@/app/lib/api-types";
+import { ProgressBar } from "@/components/reading/progress-bar";
+import { StatusSelect } from "@/components/reading/status-select";
+import type { LibraryEntry } from "@/app/lib/api-types";
 import { formatChapter } from "@/app/lib/format";
-import { READING_STATUS_LABELS, READING_STATUSES } from "@/app/lib/labels";
-import { useApiMutation } from "@/hooks/use-api-mutation";
+import { useProgressUpdate } from "@/hooks/use-progress-update";
 
 type LibraryEntryControlsProps = {
   entry: Pick<LibraryEntry, "manhwaId" | "status" | "currentChapter"> & {
@@ -16,84 +15,41 @@ type LibraryEntryControlsProps = {
   };
 };
 
-// Client Component : +1 chapitre et changement de statut, avec retour visuel immédiat (optimiste).
+// Contrôles compacts d'une carte de bibliothèque : statut modifiable sur place et « +1 » optimiste.
+// (La fiche détaillée propose en plus la saisie directe du chapitre, cf. ProgressEditor.)
 export function LibraryEntryControls({ entry }: LibraryEntryControlsProps) {
-  const { mutate, isPending, error } = useApiMutation();
-  const [progress, applyPatch] = useOptimistic(
-    { status: entry.status, currentChapter: entry.currentChapter },
-    (state, patch: ProgressPatch) => ({ ...state, ...patch }),
-  );
-  const { totalChapters } = entry.manhwa;
-
-  const update = (patch: ProgressPatch) =>
-    mutate(() => api.reading.progress[":manhwaId"].$put({ param: { manhwaId: entry.manhwaId }, json: patch }), {
-      optimistic: () => applyPatch(patch),
-    });
+  const { title, totalChapters } = entry.manhwa;
+  const { update, isPending } = useProgressUpdate(entry.manhwaId);
+  const [currentChapter, setOptimisticChapter] = useOptimistic(entry.currentChapter);
 
   // Chapitre suivant « entier » : depuis un bonus (10.5), +1 mène au chapitre 11.
-  const nextChapter = Math.floor(progress.currentChapter) + 1;
+  const nextChapter = Math.floor(currentChapter) + 1;
 
-  const changeStatus = (value: string) => {
-    const status = READING_STATUSES.find((candidate) => candidate === value);
-    if (status && status !== progress.status) update({ status });
-  };
+  const readNext = () =>
+    update(
+      { currentChapter: nextChapter },
+      {
+        optimistic: () => setOptimisticChapter(nextChapter),
+        success: `« ${title} » : chapitre ${formatChapter(nextChapter)} lu.`,
+        undo: { currentChapter: entry.currentChapter },
+      },
+    );
 
   return (
     <div className="flex flex-col gap-3" aria-busy={isPending}>
-      <div className="space-y-1.5">
-        <div className="flex items-center justify-between gap-2 text-sm">
-          <span className="text-muted-foreground">Chapitre</span>
-          <span className="font-medium tabular-nums">
-            {formatChapter(progress.currentChapter)}
-            {totalChapters !== null && <span className="text-muted-foreground"> / {totalChapters}</span>}
-          </span>
-        </div>
-        {totalChapters !== null && totalChapters > 0 && (
-          <div
-            role="progressbar"
-            aria-label={`Progression de lecture de ${entry.manhwa.title}`}
-            aria-valuemin={0}
-            aria-valuemax={totalChapters}
-            aria-valuenow={Math.min(progress.currentChapter, totalChapters)}
-            className="bg-muted h-1.5 overflow-hidden rounded-full"
-          >
-            <div
-              className="bg-primary h-full rounded-full transition-[width]"
-              style={{ width: `${Math.min(100, (progress.currentChapter / totalChapters) * 100)}%` }}
-            />
-          </div>
-        )}
-      </div>
-
+      <ProgressBar title={title} currentChapter={currentChapter} totalChapters={totalChapters} />
       <div className="flex gap-2">
-        <Select value={progress.status} onValueChange={changeStatus} disabled={isPending}>
-          <SelectTrigger className="flex-1" aria-label={`Statut de lecture de ${entry.manhwa.title}`}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {READING_STATUSES.map((status) => (
-              <SelectItem key={status} value={status}>
-                {READING_STATUS_LABELS[status]}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <StatusSelect manhwaId={entry.manhwaId} title={title} status={entry.status} className="min-w-0 flex-1" />
         <Button
           variant="outline"
-          onClick={() => update({ currentChapter: nextChapter })}
+          onClick={readNext}
           disabled={isPending}
-          aria-label={`Marquer le chapitre ${nextChapter} de ${entry.manhwa.title} comme lu`}
+          aria-label={`Marquer le chapitre ${nextChapter} de ${title} comme lu`}
           title={`Marquer le chapitre ${nextChapter} comme lu`}
         >
           <Plus data-icon="inline-start" />1
         </Button>
       </div>
-
-      {error && (
-        <p role="alert" className="text-destructive text-xs">
-          {error}
-        </p>
-      )}
     </div>
   );
 }
