@@ -16,7 +16,7 @@ from urllib.parse import urlsplit
 from selectolax.lexbor import LexborHTMLParser
 
 from ..contract import IngestChapter, IngestManhwa
-from ..fetching import PageFetcher
+from ..fetching import FetchError, PageFetcher
 
 
 class ExtractionError(RuntimeError):
@@ -50,7 +50,14 @@ class SourceExtractor(ABC):
         """URLs de toutes les fiches du catalogue, sans doublon, page après page."""
         seen: set[str] = set()
         for page in range(1, self.max_catalog_pages + 1):
-            result = await self._fetcher.fetch(self.catalog_page_url(page))
+            try:
+                result = await self._fetcher.fetch(self.catalog_page_url(page))
+            except FetchError as error:
+                # WordPress répond 404 au-delà de la dernière page : c'est la fin du catalogue, pas une panne.
+                # Sur la page 1, en revanche, un 404 signale une URL de catalogue erronée.
+                if error.status == 404 and page > 1:
+                    return
+                raise
             urls = [
                 url for url in self.parse_catalog_page(LexborHTMLParser(result.html), result.url) if url not in seen
             ]

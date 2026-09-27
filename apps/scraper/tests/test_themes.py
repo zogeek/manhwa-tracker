@@ -76,6 +76,14 @@ class TestMadara:
         assert urls == [NECRO, SOLO]
         assert len(fetcher.calls) == 2
 
+    async def test_discover_stops_when_the_next_catalog_page_is_a_404(self) -> None:
+        fetcher = FakeFetcher()  # page 2 absente → 404, comme WordPress après la dernière page
+        fetcher.add("https://scan.test/manga/?m_orderby=latest", fixture("madara_catalog.html"))
+
+        urls = [url async for url in DemoMadara(fetcher).discover()]
+
+        assert urls == [NECRO, SOLO]
+
 
 class TestMangaThemesia:
     async def test_scrapes_series(self) -> None:
