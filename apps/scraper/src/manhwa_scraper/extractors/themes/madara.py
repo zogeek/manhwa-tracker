@@ -13,7 +13,16 @@ from selectolax.lexbor import LexborHTMLParser, LexborNode
 
 from ...contract import IngestChapter, IngestManhwa
 from ..base import ExtractionError, SourceExtractor
-from ..parsing import absolute_url, clean_text, image_url, parse_chapter_number, parse_date, parse_status, parse_type
+from ..parsing import (
+    absolute_url,
+    clean_text,
+    image_url,
+    parse_chapter_number,
+    parse_chapter_title,
+    parse_date,
+    parse_status,
+    parse_type,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +107,7 @@ class MadaraExtractor(SourceExtractor, ABC):
                     number=number,
                     url=absolute_url(series_url, href),
                     language=self.language,
-                    title=_chapter_title(label),
+                    title=parse_chapter_title(label),
                     published_at=parse_date(_release_date_label(date_node, selectors.chapter_date_attr)),
                 )
             )
@@ -122,14 +131,6 @@ def _first_value(info: dict[str, str], *needles: str) -> str | None:
     for label, value in info.items():
         if any(needle in label for needle in needles):
             return value
-    return None
-
-
-def _chapter_title(label: str) -> str | None:
-    """« Chapitre 12 - Le retour » → « Le retour »."""
-    for separator in (" - ", " – ", " : "):
-        if separator in label:
-            return label.split(separator, 1)[1].strip() or None
     return None
 
 
