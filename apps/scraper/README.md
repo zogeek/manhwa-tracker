@@ -47,7 +47,7 @@ en Zod, restent dans `models.py` (tolérantes aux champs inconnus).
 | Besoin | Choix | Pourquoi |
 |---|---|---|
 | Paquets / Python | **uv** | Résolution et installation 10–100× plus rapides que pip/Poetry, lockfile multiplateforme, installe lui-même la bonne version de Python (`.python-version`). |
-| Anti-bot, étage rapide | **curl_cffi** | Rejoue l'empreinte TLS/HTTP2 de Chrome : passe les WAF qui filtrent les clients Python sur la poignée de main (scan-manga.com : 403 avec un client classique, 200 avec curl_cffi). |
+| Anti-bot, étage rapide | **curl_cffi** | Rejoue l'empreinte TLS/HTTP2 de Chrome : passe les WAF qui filtrent les clients Python sur la poignée de main (scan-manga.com : 403 pour `curl` même déguisé en Chrome, car son empreinte contredit son User-Agent ; 200 avec curl_cffi). |
 | Anti-bot, étage navigateur | **Camoufox** | Firefox dont l'empreinte est falsifiée dans le moteur (C++), pas en JavaScript. Sur astral-manga.fr, Chromium (même patché) reste bloqué par le challenge Cloudflare ; Camoufox le passe. |
 | Pilotage du navigateur | **Playwright** (API seule) | Camoufox se pilote avec l'API Playwright : on garde la « télécommande » (`page.goto`, `page.content`…), seul le navigateur change. Déclaré explicitement car `browser.py` l'importe directement. |
 | Parsing HTML | **selectolax** (Lexbor) | Sélecteurs CSS, parseur en C bien plus rapide que BeautifulSoup. |
@@ -90,6 +90,6 @@ src/manhwa_scraper/
 | Source | Moteur | Protection | Étage suffisant | État |
 |---|---|---|---|---|
 | mangas-origines.fr | Madara (thème enfant) | Cloudflare | HTTP | ✅ **prêt** (1 requête par fiche, chapitres compris ; essai réel : 3 œuvres, 417 chapitres ingérés) |
-| scan-manga.com | PHP propriétaire | Cloudflare (filtre TLS) | HTTP (curl_cffi) | squelette |
+| scan-manga.com | PHP propriétaire | Cloudflare (bot management) | HTTP (curl_cffi) | ✅ **prêt** : découverte par l'accueil (~100 dernières sorties, le catalogue complet est rendu en JS), romans écartés, tomes licenciés ignorés |
 | rimuscan.fr | Next.js | Cloudflare (sans challenge) | HTTP | squelette |
 | astral-manga.fr | Next.js | Cloudflare (challenge JS) | Navigateur (Camoufox) | squelette |
