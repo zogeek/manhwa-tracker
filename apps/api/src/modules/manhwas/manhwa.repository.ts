@@ -3,11 +3,13 @@ import { unionAll, type AnyPgColumn } from 'drizzle-orm/pg-core';
 import type { DbClient } from '../../shared/db/index.js';
 import { firstOrNull, firstOrThrow } from '../../shared/db/utils.js';
 import { manhwaTitles } from '../../shared/db/schema.js';
-import { manhwas, type ManhwaSearchHit, type NewManhwa, type Manhwa } from './manhwa.schema.js';
+import { withManhwaExtras } from './manhwa-extras.js';
+import { manhwas, type ManhwaSearchHit, type ManhwaView, type NewManhwa, type Manhwa } from './manhwa.schema.js';
 
 export interface ManhwaRepository {
-  findAll(): Promise<Manhwa[]>;
-  findById(id: Manhwa['id']): Promise<Manhwa | null>;
+  /** Lectures « prêtes à afficher » : auteurs et couverture locale inclus. */
+  findAll(): Promise<ManhwaView[]>;
+  findById(id: Manhwa['id']): Promise<ManhwaView | null>;
   insert(data: NewManhwa): Promise<Manhwa>;
   update(id: Manhwa['id'], data: Partial<NewManhwa>): Promise<Manhwa | null>;
   /** `deletedBy` est tracé dans `updated_by`. */
@@ -40,17 +42,17 @@ const titleScore = (column: AnyPgColumn, query: string) =>
 export class DrizzleManhwaRepository implements ManhwaRepository {
   constructor(private readonly db: DbClient) {}
 
-  async findAll(): Promise<Manhwa[]> {
-    return this.db.select().from(manhwas).where(isNull(manhwas.deletedAt));
+  async findAll(): Promise<ManhwaView[]> {
+    return withManhwaExtras(this.db, await this.db.select().from(manhwas).where(isNull(manhwas.deletedAt)));
   }
 
-  async findById(id: Manhwa['id']): Promise<Manhwa | null> {
+  async findById(id: Manhwa['id']): Promise<ManhwaView | null> {
     const rows = await this.db
       .select()
       .from(manhwas)
       .where(and(eq(manhwas.id, id), isNull(manhwas.deletedAt)))
       .limit(1);
-    return firstOrNull(rows);
+    return firstOrNull(await withManhwaExtras(this.db, rows));
   }
 
   async insert(data: NewManhwa): Promise<Manhwa> {
@@ -111,7 +113,10 @@ export class DrizzleManhwaRepository implements ManhwaRepository {
         .groupBy(manhwas.id)
         .orderBy(desc(score), asc(manhwas.title))
         .limit(limit);
-      return rows.map(({ manhwa, score }) => ({ ...manhwa, score }));
+      return withManhwaExtras(
+        tx,
+        rows.map(({ manhwa, score }) => ({ ...manhwa, score })),
+      );
     });
   }
 }

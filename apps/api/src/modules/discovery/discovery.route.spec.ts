@@ -1,14 +1,17 @@
 import { and, eq } from 'drizzle-orm';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import {
+  authors,
   chapterReleases,
   chapters,
   externalLinks,
   jobs,
+  manhwaAuthors,
   manhwaCovers,
   manhwaSources,
   manhwaTerms,
   manhwaTitles,
+  manhwas as manhwasTable,
   sources,
   termAliases,
   terms,
@@ -496,5 +499,116 @@ describe('chapter sync is provider-agnostic (driven by the work links)', () => {
     const synced = await context.db.select().from(chapters).where(eq(chapters.manhwaId, fromAniList.id));
     expect(synced.map((chapter) => chapter.number).sort()).toEqual([1, 2]);
     expect(upstream.calls.some((call) => call.url.pathname === `/manga/${TBATE_MANGADEX_ID}/feed`)).toBe(true);
+  });
+});
+
+describe('authors — import, display and pivot integrity', () => {
+  const TBATE_AUTHORS = [
+    { name: 'TurtleMe', nativeName: '터틀미', role: 'story' },
+    { name: 'Fuyuki23', nativeName: null, role: 'art' },
+  ];
+
+  it('imports the authors with their role and order, visible in every read of the manhwa', async () => {
+    const { data: imported } = await (await importTbate(reader)).json();
+    expect(imported.authors).toEqual(TBATE_AUTHORS);
+
+    const detail = await (await manhwas[':id'].$get({ param: { id: imported.id } })).json();
+    expect(detail.data.authors).toEqual(TBATE_AUTHORS);
+
+    const list = await (await manhwas.$get()).json();
+    expect(list.data.find((manhwa) => manhwa.id === imported.id)?.authors).toEqual(TBATE_AUTHORS);
+    // Les autres fiches (sans auteurs connus) ont une liste vide, jamais `undefined`.
+    expect(list.data.find((manhwa) => manhwa.id === catalog.manhwa.id)?.authors).toEqual([]);
+
+    const found = await (await search('Beginning After the End')).json();
+    expect(found.data.local[0]?.authors).toEqual(TBATE_AUTHORS);
+
+    await context.client.reading.progress[':manhwaId'].$put(
+      { param: { manhwaId: imported.id }, json: {} },
+      { headers: reader.headers },
+    );
+    const library = await (await context.client.reading.progress.$get({}, { headers: reader.headers })).json();
+    expect(library.data[0]?.manhwa.authors).toEqual(TBATE_AUTHORS);
+  });
+
+  it('keeps the first catalogue authors when the same work is imported again from another one', async () => {
+    const { data: fromAniList } = await (await importTbate(reader)).json();
+    await importTbateFromMangaDex(admin); // autres graphies (« Turtle-Me (터틀미) ») + « Studio Waveon »
+
+    const detail = await (await manhwas[':id'].$get({ param: { id: fromAniList.id } })).json();
+    expect(detail.data.authors).toEqual(TBATE_AUTHORS);
+    const names = (await context.db.select({ name: authors.name }).from(authors)).map((row) => row.name).sort();
+    expect(names).toEqual(['Fuyuki23', 'TurtleMe']);
+  });
+
+  it('gives authors to a work imported first from a catalogue without staff (Kitsu)', async () => {
+    const { data: fromKitsu } = await (
+      await manhwas.import.$post({ json: { provider: 'kitsu', externalId: TBATE_KITSU_ID } }, { headers: reader.headers })
+    ).json();
+    expect(fromKitsu.authors).toEqual([]);
+
+    // MangaDex reconnaît la même œuvre (référence AniList commune) : ses auteurs complètent la fiche.
+    // (Un import AniList ne passerait pas par là : Kitsu a déjà lié l'id AniList, l'interface propose « Voir la fiche ».)
+    const res = await importTbateFromMangaDex(admin);
+    expect(res.status).toBe(200);
+    const detail = await (await manhwas[':id'].$get({ param: { id: fromKitsu.id } })).json();
+    expect(detail.data.authors).toEqual([
+      { name: 'Turtle-Me', nativeName: '터틀미', role: 'story' },
+      { name: 'Fuyuki23', nativeName: null, role: 'art' },
+      { name: 'Studio Waveon', nativeName: null, role: 'both' },
+    ]);
+  });
+
+  it('keeps authors and manhwas consistent when either side is deleted (pivot cascade)', async () => {
+    const { data: manhwa } = await (await importTbate(reader)).json();
+
+    // Suppression d'un auteur : seul son lien disparaît, la fiche reste lisible.
+    await context.db.delete(authors).where(eq(authors.name, 'Fuyuki23'));
+    const detail = await manhwas[':id'].$get({ param: { id: manhwa.id } });
+    expect(detail.status).toBe(200);
+    expect((await detail.json()).data.authors).toEqual([{ name: 'TurtleMe', nativeName: '터틀미', role: 'story' }]);
+
+    // Soft delete de la fiche (admin) : les liens sont conservés (restauration possible).
+    await manhwas[':id'].$delete({ param: { id: manhwa.id } }, { headers: admin.headers });
+    expect(await context.db.select().from(manhwaAuthors).where(eq(manhwaAuthors.manhwaId, manhwa.id))).toHaveLength(1);
+
+    // Hard delete de la fiche : les liens partent en cascade, l'auteur (partageable) reste.
+    await context.db.delete(manhwasTable).where(eq(manhwasTable.id, manhwa.id));
+    expect(await context.db.select().from(manhwaAuthors)).toEqual([]);
+    expect((await context.db.select({ name: authors.name }).from(authors)).map((row) => row.name)).toEqual(['TurtleMe']);
+  });
+});
+
+describe('local covers — served by the API once mirrored', () => {
+  it('exposes the local copy after the cover.mirror job, and it is actually served (no 404)', async () => {
+    const { data: imported } = await (await importTbate(reader)).json();
+    // Tant que la tâche n'a pas tourné : pas de copie locale, le front passe par le proxy.
+    expect(imported.localCoverUrl).toBeNull();
+
+    await context.worker.runOnce();
+
+    const { data: detail } = await (await manhwas[':id'].$get({ param: { id: imported.id } })).json();
+    expect(detail.localCoverUrl).toMatch(/^\/images\/media\/[a-f0-9]{64}\.png$/);
+    const list = await (await manhwas.$get()).json();
+    expect(list.data.find((manhwa) => manhwa.id === imported.id)?.localCoverUrl).toBe(detail.localCoverUrl);
+
+    const image = await context.app.request(detail.localCoverUrl ?? '');
+    expect(image.status).toBe(200);
+    expect(image.headers.get('content-type')).toBe('image/png');
+    expect(new Uint8Array(await image.arrayBuffer())).toEqual(PNG);
+  });
+
+  it('never serves a stale copy once the displayed cover changes', async () => {
+    const { data: imported } = await (await importTbate(reader)).json();
+    await context.worker.runOnce();
+
+    await manhwas[':id'].$patch(
+      { param: { id: imported.id }, json: { coverUrl: 'https://s4.anilist.co/file/new-cover.png' } },
+      { headers: admin.headers },
+    );
+
+    const { data: detail } = await (await manhwas[':id'].$get({ param: { id: imported.id } })).json();
+    expect(detail.localCoverUrl).toBeNull();
+    expect(detail.coverUrl).toBe('https://s4.anilist.co/file/new-cover.png');
   });
 });
