@@ -129,7 +129,18 @@ export type ExternalManhwa = {
   crossReferences: ExternalRef[];
 };
 
-/** Une parution de chapitre chez un fournisseur (une traduction, par une équipe, dans une langue). */
+/**
+ * Team de scantrad créditée sur une parution. `externalId` : son identifiant chez le fournisseur
+ * (UUID MangaDex), la clé la plus fiable ; `name` peut manquer si le fournisseur ne renvoie que l'id
+ * (groupe supprimé, relation non embarquée) — la team n'est alors retrouvée que si elle est déjà connue.
+ */
+export type ExternalTeam = {
+  externalId: string | null;
+  name: string | null;
+  websiteUrl: string | null;
+};
+
+/** Une parution de chapitre chez un fournisseur (une traduction, par une ou plusieurs teams, dans une langue). */
 export type ExternalChapter = {
   externalId: string;
   /** Numéro canonique (`numeric(8,2)`) ; les parutions sans numéro (one-shots) sont écartées. */
@@ -137,7 +148,8 @@ export type ExternalChapter = {
   title: string | null;
   language: string;
   url: string;
-  scanlationGroup: string | null;
+  /** Teams créditées, dans l'ordre de la source (collaboration : plusieurs) ; vide si inconnu ou non crédité. */
+  teams: ExternalTeam[];
   publishedAt: Date | null;
 };
 

@@ -12,6 +12,7 @@ import {
   type ExternalProvider,
   type ExternalRef,
   type ExternalSource,
+  type ExternalTeam,
 } from './external-catalog.js';
 
 /** Auteur technique des lignes créées par les tâches de fond (colonnes d'audit). */
@@ -28,7 +29,10 @@ export interface ChapterSyncRepository {
 export type ChapterSyncRepositories = {
   sync: ChapterSyncRepository;
   // Réutilise les upserts idempotents de l'ingestion : une seule façon d'écrire un chapitre.
-  ingestion: Pick<IngestionRepository, 'upsertChapter' | 'upsertScanlationGroup' | 'upsertRelease' | 'linkManhwaSource'>;
+  ingestion: Pick<
+    IngestionRepository,
+    'upsertChapter' | 'upsertTeam' | 'upsertRelease' | 'setReleaseTeams' | 'linkManhwaSource'
+  >;
 };
 
 export class DrizzleChapterSyncRepository implements ChapterSyncRepository {
@@ -80,6 +84,8 @@ export class DrizzleChapterSyncRepository implements ChapterSyncRepository {
     return firstOrNull(rows)?.id ?? null;
   }
 }
+
+const teamKey = ({ externalId, name }: ExternalTeam) => (externalId ? `id:${externalId}` : `name:${name ?? ''}`);
 
 export type ChapterSyncStats = { chapters: number; chaptersCreated: number; releasesCreated: number };
 
@@ -155,7 +161,8 @@ export class ChapterSyncJob implements JobHandler<'chapters.sync'> {
 
     const stats = await this.transactions.run(async ({ sync, ingestion }): Promise<ChapterSyncStats> => {
       const sourceId = await sync.ensureSource(feed.source);
-      const groupIds = new Map<string, string>();
+      // Cache par synchronisation : « Asura Scans » n'est résolue qu'une fois, même sur 500 chapitres.
+      const groupIds = new Map<string, string | null>();
       const chapterNumbers = new Set<number>();
       let chaptersCreated = 0;
       let releasesCreated = 0;
@@ -172,21 +179,26 @@ export class ChapterSyncJob implements JobHandler<'chapters.sync'> {
         chapterNumbers.add(chapter.number);
         if (created) chaptersCreated += 1;
 
-        let scanlationGroupId: string | null = null;
-        if (chapter.scanlationGroup) {
-          scanlationGroupId = groupIds.get(chapter.scanlationGroup) ?? (await ingestion.upsertScanlationGroup(chapter.scanlationGroup));
-          groupIds.set(chapter.scanlationGroup, scanlationGroupId);
-        }
-
-        const releaseCreated = await ingestion.upsertRelease({
+        const release = await ingestion.upsertRelease({
           chapterId,
           sourceId,
-          scanlationGroupId,
           url: chapter.url,
           language: chapter.language,
           publishedAt: chapter.publishedAt,
         });
-        if (releaseCreated) releasesCreated += 1;
+        if (release.created) releasesCreated += 1;
+
+        // Teams créditées : les ids du fournisseur (ex. UUID MangaDex) vivent dans l'espace de noms `feed.name`.
+        const teamIds: string[] = [];
+        for (const team of chapter.teams) {
+          const key = teamKey(team);
+          if (!groupIds.has(key)) {
+            groupIds.set(key, await ingestion.upsertTeam({ ...team, provider: team.externalId ? feed.name : null }));
+          }
+          const teamId = groupIds.get(key);
+          if (teamId) teamIds.push(teamId);
+        }
+        await ingestion.setReleaseTeams(release.id, teamIds);
       }
 
       await ingestion.linkManhwaSource({

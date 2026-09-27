@@ -3,6 +3,7 @@ import { BadGatewayError, NotFoundError, ServiceUnavailableError } from '../../s
 import { createFakeFetch, type FakeHandler } from '../../test/fake-fetch.js';
 import {
   mangaDexChapter,
+  mangaDexGroupId,
   mangaDexEntityResponse,
   mangaDexFeedResponse,
   mangaDexManga,
@@ -154,11 +155,37 @@ describe('MangaDexClient.listChapters', () => {
         title: 'Prologue',
         language: 'fr',
         url: expect.stringMatching(/^https:\/\/mangadex\.org\/chapter\//),
-        scanlationGroup: 'Scan FR',
+        teams: [{ externalId: mangaDexGroupId('Scan FR'), name: 'Scan FR', websiteUrl: null }],
         publishedAt: new Date('2021-03-05T14:57:57Z'),
       },
-      expect.objectContaining({ number: 10.5, title: null, scanlationGroup: null, language: 'en' }),
+      expect.objectContaining({ number: 10.5, title: null, teams: [], language: 'en' }),
     ]);
+  });
+
+  it('asks MangaDex to embed the groups, so names come with the chapters in a single request', async () => {
+    const { client, calls } = createClient(() =>
+      mangaDexFeedResponse([
+        mangaDexChapter({
+          groups: [
+            { name: 'Asura Scans', website: 'https://asuracomic.net' },
+            { name: 'Flame Comics', website: 'not a url' },
+          ],
+        }),
+        // Groupe supprimé chez MangaDex : relation sans attributs, seul l'UUID reste.
+        mangaDexChapter({ chapter: '2', groups: [{}] }),
+      ]),
+    );
+
+    const [collab, orphan] = await client.listChapters(TBATE_MANGADEX_ID);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url.searchParams.getAll('includes[]')).toEqual(['scanlation_group']);
+    // Collaboration : les deux teams, dans l'ordre de crédit ; un site invalide est ignoré.
+    expect(collab?.teams).toEqual([
+      { externalId: mangaDexGroupId('Asura Scans'), name: 'Asura Scans', websiteUrl: 'https://asuracomic.net' },
+      { externalId: mangaDexGroupId('Flame Comics'), name: 'Flame Comics', websiteUrl: null },
+    ]);
+    expect(orphan?.teams).toEqual([{ externalId: '00000000-0000-4000-9000-00000000dead', name: null, websiteUrl: null }]);
   });
 
   it('follows the pagination, bounded by maxFeedPages', async () => {

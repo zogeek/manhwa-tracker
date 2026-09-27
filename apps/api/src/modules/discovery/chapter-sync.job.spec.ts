@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { TransactionRunner } from '../../shared/db/transaction.js';
 import { BadGatewayError, NotFoundError } from '../../shared/lib/errors.js';
-import type { ManhwaSourceLink } from '../ingestion/ingestion.repository.js';
+import type { ManhwaSourceLink, TeamInput } from '../ingestion/ingestion.repository.js';
 import type { NewChapterRelease } from '../ingestion/ingestion.schema.js';
 import type { IngestChapterItem } from '../ingestion/ingestion.validator.js';
 import { ChapterSyncJob, type ChapterSyncRepositories, type ChapterSyncRepository } from './chapter-sync.job.js';
@@ -12,10 +12,17 @@ import type {
   ExternalProvider,
   ExternalRef,
   ExternalSource,
+  ExternalTeam,
 } from './external-catalog.js';
 
 const MANHWA_ID = randomUUID();
 const MANGADEX_ID = 'a1c7c817-4e59-43b7-9365-09675a149a6f';
+
+const team = (name: string | null, externalId: string | null = null): ExternalTeam => ({
+  externalId,
+  name,
+  websiteUrl: null,
+});
 
 const chapter = (number: number, overrides: Partial<ExternalChapter> = {}): ExternalChapter => ({
   externalId: randomUUID(),
@@ -23,7 +30,7 @@ const chapter = (number: number, overrides: Partial<ExternalChapter> = {}): Exte
   title: null,
   language: 'en',
   url: `https://feed.example/chapter/${randomUUID()}`,
-  scanlationGroup: 'Tapas Official',
+  teams: [team('Tapas Official')],
   publishedAt: null,
   ...overrides,
 });
@@ -56,8 +63,11 @@ class InMemoryCatalog implements ChapterSyncRepository {
   refs: Pick<ExternalRef, 'provider' | 'externalId'>[] = [];
   readonly sourceIds = new Map<string, string>();
   readonly chapters = new Map<number, string>();
+  /** Teams connues, par clé d'identité (`provider:id` ou nom) → id. */
   readonly groups = new Map<string, string>();
-  readonly releases = new Map<string, NewChapterRelease>();
+  readonly teamCalls: TeamInput[] = [];
+  readonly releases = new Map<string, NewChapterRelease & { id: string }>();
+  readonly releaseTeams = new Map<string, readonly string[]>();
   readonly links: ManhwaSourceLink[] = [];
 
   async isManhwaActive(): Promise<boolean> {
@@ -82,15 +92,25 @@ class InMemoryCatalog implements ChapterSyncRepository {
       this.chapters.set(item.number, id);
       return { id, created: true };
     },
-    upsertScanlationGroup: async (name: string) => {
-      const id = this.groups.get(name) ?? randomUUID();
-      this.groups.set(name, id);
+    upsertTeam: async (input: TeamInput) => {
+      this.teamCalls.push(input);
+      const key = input.provider && input.externalId ? `${input.provider}:${input.externalId}` : input.name;
+      if (!key) return null;
+      const known = this.groups.get(key);
+      if (known) return known;
+      if (!input.name) return null; // id inconnu et pas de nom : impossible à créer
+      const id = randomUUID();
+      this.groups.set(key, id);
       return id;
     },
     upsertRelease: async (data: NewChapterRelease) => {
-      const created = !this.releases.has(data.url);
-      this.releases.set(data.url, data);
-      return created;
+      const existing = this.releases.get(data.url);
+      const id = existing?.id ?? randomUUID();
+      this.releases.set(data.url, { ...data, id });
+      return { id, created: !existing };
+    },
+    setReleaseTeams: async (releaseId: string, teamIds: readonly string[]) => {
+      if (teamIds.length > 0) this.releaseTeams.set(releaseId, teamIds);
     },
     linkManhwaSource: async (link: ManhwaSourceLink) => {
       this.links.push(link);
@@ -125,7 +145,7 @@ describe('ChapterSyncJob — picks its sources from the work links', () => {
       { provider: 'anilist', externalId: '105398' },
       { provider: 'mangadex', externalId: MANGADEX_ID },
     ];
-    mangadex.chapters = [chapter(1), chapter(1, { language: 'fr', scanlationGroup: 'Scan FR' }), chapter(2.5, { scanlationGroup: null })];
+    mangadex.chapters = [chapter(1), chapter(1, { language: 'fr', teams: [team('Scan FR')] }), chapter(2.5, { teams: [] })];
 
     await run();
 
@@ -185,6 +205,47 @@ describe('ChapterSyncJob — picks its sources from the work links', () => {
 
     expect(catalog.chapters.size).toBe(2);
     expect(catalog.releases.size).toBe(2);
+  });
+});
+
+describe('ChapterSyncJob — scanlation teams', () => {
+  beforeEach(() => {
+    catalog.refs = [{ provider: 'mangadex', externalId: MANGADEX_ID }];
+  });
+
+  it('credits every team of a collaboration, in order, under the provider id namespace', async () => {
+    const asura = team('Asura Scans', 'uuid-asura');
+    const flame = team('Flame Comics', 'uuid-flame');
+    mangadex.chapters = [chapter(1, { teams: [asura, flame] })];
+
+    await run();
+
+    const [release] = [...catalog.releases.values()];
+    expect(catalog.releaseTeams.get(release?.id ?? '')).toEqual([
+      catalog.groups.get('mangadex:uuid-asura'),
+      catalog.groups.get('mangadex:uuid-flame'),
+    ]);
+    // Les ids du fournisseur sont rangés sous son nom (`feed.name`) : aucun fournisseur codé en dur.
+    expect(catalog.teamCalls.map((call) => call.provider)).toEqual(['mangadex', 'mangadex']);
+  });
+
+  it('resolves each team once per sync, however many chapters it translated', async () => {
+    const asura = team('Asura Scans', 'uuid-asura');
+    mangadex.chapters = Array.from({ length: 50 }, (_, index) => chapter(index + 1, { teams: [asura] }));
+
+    await run();
+
+    expect(catalog.teamCalls).toHaveLength(1);
+    expect(new Set([...catalog.releaseTeams.values()].flat())).toEqual(new Set([catalog.groups.get('mangadex:uuid-asura')]));
+  });
+
+  it('skips a team that cannot be identified (unknown id, no name) without failing the sync', async () => {
+    mangadex.chapters = [chapter(1, { teams: [team(null, 'uuid-deleted'), team('Asura Scans', 'uuid-asura')] })];
+
+    await expect(run()).resolves.toBeUndefined();
+
+    const [release] = [...catalog.releases.values()];
+    expect(catalog.releaseTeams.get(release?.id ?? '')).toEqual([catalog.groups.get('mangadex:uuid-asura')]);
   });
 });
 

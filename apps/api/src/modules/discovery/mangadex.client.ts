@@ -14,6 +14,7 @@ import {
   type ExternalRef,
   type ExternalSource,
   type ExternalTag,
+  type ExternalTeam,
   type ExternalTitle,
 } from './external-catalog.js';
 
@@ -233,20 +234,44 @@ export function toExternalManhwa(manga: MangaDexManga): ExternalManhwa {
   };
 }
 
+const httpsUrl = z.url({ protocol: /^https?$/ }).max(500);
+
+/**
+ * Teams créditées : relations `scanlation_group` du chapitre (plusieurs en cas de collaboration).
+ * Grâce à `includes[]=scanlation_group`, MangaDex embarque nom et site dans la même réponse ;
+ * sans `attributes` (groupe supprimé…), on garde au moins l'UUID pour retrouver une team connue.
+ */
+function teamsOf(chapter: MangaDexChapter): ExternalTeam[] {
+  const seen = new Set<string>();
+  return (chapter.relationships ?? []).flatMap((relationship): ExternalTeam[] => {
+    if (relationship.type !== 'scanlation_group' || !UUID_PATTERN.test(relationship.id)) return [];
+    const externalId = relationship.id.toLowerCase();
+    if (seen.has(externalId)) return [];
+    seen.add(externalId);
+    const name = relationship.attributes?.['name'];
+    const website = httpsUrl.safeParse(relationship.attributes?.['website']);
+    return [
+      {
+        externalId,
+        name: typeof name === 'string' ? (clean(name)?.slice(0, 100) ?? null) : null,
+        websiteUrl: website.success ? website.data : null,
+      },
+    ];
+  });
+}
+
 /** Parution MangaDex → chapitre du domaine ; `null` pour un one-shot ou un numéro non numérique. */
 export function toExternalChapter(chapter: MangaDexChapter): ExternalChapter | null {
   const { chapter: number, title, translatedLanguage, publishAt } = chapter.attributes;
   if (!number || !CHAPTER_NUMBER_PATTERN.test(number)) return null;
 
-  const group = chapter.relationships?.find((relationship) => relationship.type === 'scanlation_group');
-  const groupName = group?.attributes?.['name'];
   return {
     externalId: chapter.id,
     number: Number(number),
     title: clean(title)?.slice(0, 500) ?? null,
     language: translatedLanguage,
     url: `${MANGADEX_SITE_URL}/chapter/${chapter.id}`,
-    scanlationGroup: typeof groupName === 'string' ? (clean(groupName)?.slice(0, 100) ?? null) : null,
+    teams: teamsOf(chapter),
     publishedAt: publishAt ? new Date(publishAt) : null,
   };
 }
