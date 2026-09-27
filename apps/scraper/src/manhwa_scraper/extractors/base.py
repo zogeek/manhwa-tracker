@@ -1,0 +1,90 @@
+"""Classe abstraite commune à toutes les sources (pattern « Template Method »).
+
+Le déroulé d'un scraping est toujours le même — lister les œuvres, télécharger une fiche, en extraire
+les métadonnées puis les chapitres — seules les étapes « lire le HTML » changent d'un site à l'autre.
+`SourceExtractor` fixe ce déroulé ; les thèmes (Madara, MangaThemesia) implémentent les étapes pour
+tout un CMS ; un site n'a plus qu'à déclarer son URL et, au besoin, surcharger quelques sélecteurs.
+
+Les méthodes `parse_*` sont pures (HTML → modèles) : on les teste sur des fixtures, sans réseau.
+"""
+
+from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator
+from typing import ClassVar
+from urllib.parse import urlsplit
+
+from selectolax.lexbor import LexborHTMLParser
+
+from ..fetching import PageFetcher
+from ..models import ScrapedChapter, ScrapedManhwa, SeriesMetadata
+
+
+class ExtractionError(RuntimeError):
+    """La page a été récupérée mais ne ressemble pas à ce que l'extracteur attend (sélecteur cassé, refonte du site)."""
+
+
+class SourceExtractor(ABC):
+    slug: ClassVar[str]
+    """Identifiant stable, utilisé en ligne de commande (`manhwa-scraper run <slug>`)."""
+    name: ClassVar[str]
+    base_url: ClassVar[str]
+    """Origine du site, avec `/` final (ex. `https://exemple.fr/`)."""
+    language: ClassVar[str] = "fr"
+    ready: ClassVar[bool] = False
+    """`False` tant que les sélecteurs n'ont pas été validés sur le site réel : la CLI refuse de le lancer."""
+    max_catalog_pages: ClassVar[int] = 500
+    """Garde-fou contre une pagination qui ne s'arrête jamais (page « suivante » qui boucle)."""
+
+    def __init__(self, fetcher: PageFetcher) -> None:
+        self._fetcher = fetcher
+
+    @classmethod
+    def handles(cls, url: str) -> bool:
+        """Cette source est-elle celle de `url` (sous-domaines `www.` compris) ?"""
+        host = (urlsplit(url).hostname or "").removeprefix("www.")
+        return host == (urlsplit(cls.base_url).hostname or "").removeprefix("www.")
+
+    # ---- Déroulé (template method) ----
+
+    async def discover(self) -> AsyncIterator[str]:
+        """URLs de toutes les fiches du catalogue, sans doublon, page après page."""
+        seen: set[str] = set()
+        for page in range(1, self.max_catalog_pages + 1):
+            result = await self._fetcher.fetch(self.catalog_page_url(page))
+            urls = [
+                url for url in self.parse_catalog_page(LexborHTMLParser(result.html), result.url) if url not in seen
+            ]
+            if not urls:
+                return
+            for url in urls:
+                seen.add(url)
+                yield url
+
+    async def scrape_series(self, url: str) -> ScrapedManhwa:
+        result = await self._fetcher.fetch(url)
+        document = LexborHTMLParser(result.html)
+        metadata = self.parse_series(document, result.url)
+        chapters = await self.collect_chapters(document, result.url)
+        return ScrapedManhwa.assemble(metadata, chapters)
+
+    async def collect_chapters(self, document: LexborHTMLParser, series_url: str) -> list[ScrapedChapter]:
+        """Par défaut les chapitres sont sur la fiche ; à surcharger s'ils arrivent par une requête séparée."""
+        return self.parse_chapters(document, series_url)
+
+    # ---- Étapes propres à chaque CMS / site ----
+
+    @abstractmethod
+    def catalog_page_url(self, page: int) -> str:
+        """URL de la page `page` (à partir de 1) du catalogue."""
+
+    @abstractmethod
+    def parse_catalog_page(self, document: LexborHTMLParser, page_url: str) -> list[str]:
+        """URLs absolues des fiches listées sur une page du catalogue (liste vide = fin du catalogue)."""
+
+    @abstractmethod
+    def parse_series(self, document: LexborHTMLParser, series_url: str) -> SeriesMetadata:
+        """Métadonnées d'une fiche. Lève `ExtractionError` si la page n'a pas la structure attendue."""
+
+    @abstractmethod
+    def parse_chapters(self, document: LexborHTMLParser, series_url: str) -> list[ScrapedChapter]:
+        """Chapitres listés dans `document` (fiche ou fragment AJAX)."""

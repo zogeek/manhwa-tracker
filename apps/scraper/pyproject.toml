@@ -1,0 +1,62 @@
+[project]
+name = "manhwa-scraper"
+version = "0.1.0"
+description = "Worker de scraping des sites de scantrad, alimente l'API Hono via /api/ingest"
+authors = [
+    { name = "zogeek", email = "91289024+zogeek@users.noreply.github.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "camoufox[geoip]>=0.5.6",
+    "curl-cffi>=0.16.3",
+    "httpx>=0.28.1",
+    "playwright>=1.62.0",
+    "pydantic>=2.13.5",
+    "pydantic-settings>=2.15.0",
+    "selectolax>=0.4.12",
+    "tenacity>=9.1.4",
+]
+
+[project.scripts]
+manhwa-scraper = "manhwa_scraper.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.12.19,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "mypy>=2.3.1",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.16.9",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "N", "UP", "B", "SIM", "ASYNC", "PT", "RUF", "C4", "PIE", "RET", "TC"]
+# Docstrings et messages en français : les caractères « » ’ … sont voulus.
+ignore = ["RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+strict = true
+python_version = "3.13"
+files = ["src", "tests"]
+plugins = ["pydantic.mypy"]
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+warn_required_dynamic_aliases = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = ["--strict-markers", "--strict-config"]
+filterwarnings = ["error"]

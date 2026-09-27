@@ -21,7 +21,7 @@
 | **DB** | PostgreSQL | 16 (Docker Alpine) |
 | **Tests API** | Vitest + testcontainers | 5.0 / 12.1 |
 | **Frontend** | Next.js + React + Tailwind + shadcn/ui | Next 16.3 / React 19.3 / TW 4.3 |
-| **Scraper** | FastAPI + Playwright (Python) — worker isolé, parle à l'API en HTTP | — |
+| **Scraper** | Python 3.13 + uv · curl_cffi → Camoufox/Playwright (anti-bot à deux étages) · selectolax · Pydantic · httpx/tenacity — worker isolé, parle à l'API en HTTP | uv 0.12 |
 | **TypeScript** | Strict (+ `noUncheckedIndexedAccess`), ESM NodeNext | 5.9 |
 
 ### Décisions d'architecture
@@ -52,7 +52,7 @@ manhwa-tracker/
 ├── apps/
 │   ├── api/              ← Backend Hono + Drizzle + Better Auth (✅ socle sécurisé, testé)
 │   ├── web/              ← Frontend Next.js (✅ branché : proxy, auth, dashboard typé)
-│   └── scraper/          ← Scraper Python (🔴 pas commencé)
+│   └── scraper/          ← Worker Python (🟡 socle livré : fetchers anti-bot, thèmes Madara/MangaThemesia, 4 squelettes)
 ├── packages/             ← Packages partagés (vide)
 ├── CLAUDE.md             ← Règles d'architecture, SOP Git, stratégie de tests
 ├── docker-compose.yml    ← PostgreSQL 16 local (port 5431)
@@ -172,9 +172,20 @@ Les tables personnelles (`reading_progress`, `chapter_reads`, `reading_lists`) o
 
 ---
 
-## 5. Scraper (`apps/scraper/`) — 🔴 Pas commencé
+## 5. Scraper (`apps/scraper/`) — 🟡 Socle livré
 
-Worker Python isolé (FastAPI/Playwright) qui poussera ses données vers l'API Hono via HTTP interne, authentifié par une clé de service (jamais les routes du client web).
+Worker Python isolé qui pousse ses données vers l'API Hono (`/api/ingest/*`, clé de service `x-api-key`), jamais vers la base. Détails : `apps/scraper/README.md`.
+
+| Élément | État |
+|---|---|
+| Projet uv (Python 3.13), scripts Turborepo (`dev`, `lint`, `typecheck`, `test`), pytest + mypy strict en CI, CodeQL Python | ✅ |
+| Récupération à deux étages : curl_cffi (empreinte TLS Chrome) puis Camoufox (navigateur anti-détection piloté par Playwright), escalade mémorisée par site, débit limité par site | ✅ vérifié en réel sur les 4 sites cibles |
+| Contrat Pydantic calqué sur le validateur Zod de l'ingestion ; client API avec ré-essais sûrs (idempotence) | ✅ |
+| `ScrapeRunner` : lots, `scrape_runs` (succeeded / partial / failed), `source_health` (up / degraded / blocked) | ✅ |
+| Thèmes Madara et MangaThemesia (extracteurs complets, testés sur fixtures synthétiques) | ✅ |
+| Sources astral-manga, scan-manga, mangas-origines, rimuscan | 🟡 squelettes (`ready = False`) |
+| Contrat généré depuis Zod (`z.toJSONSchema()` → modèles Pydantic) au lieu d'une copie manuelle | ❌ validé, à faire |
+| Planification des runs, résolution automatique du `source_id` | ❌ |
 
 ---
 
@@ -204,6 +215,7 @@ Worker Python isolé (FastAPI/Playwright) qui poussera ses données vers l'API H
 - Stabilisation : URLs en anglais (`/catalog`, `/library`) avec redirections, boutons de carte responsives, synchronisation des chapitres agnostique (pilotée par les liens de l'œuvre)
 - Progression avancée : saisie directe du chapitre, « Lu jusqu'ici » (mise à jour absolue, sans faux historique), « Annuler », bibliothèque en onglets ; l'API passe une série « à lire » en « en cours » dès qu'on saisit un chapitre
 - CI GitHub Actions (PR vers `dev`/`master` : lint → typecheck → tests Vitest → build ; migrations sur Postgres 16 éphémère + drift check), CodeQL JavaScript/TypeScript (`security-extended`, hebdomadaire) et template de PR
+- Scraper : socle Python (voir §5), intégré à la CI (pytest, mypy, Ruff) et à CodeQL
 
 ### 🔴 Priorité suivante — Sécurité & robustesse API
 
@@ -222,7 +234,7 @@ Playwright (E2E), tags de genre sur les cartes (embarquer les termes dans `GET /
 
 ### 🟤 Scraper
 
-Architecture du worker, première source, planification, ingestion via l'API.
+Contrat généré depuis Zod (JSON Schema → Pydantic), première source prête (mangas-origines : cibler la liste de chapitres du thème enfant), sources Next.js via leurs données JSON embarquées, planification des runs, `source_id` résolu depuis l'API.
 
 ### 🔵 Évolutions DB proposées (non validées)
 

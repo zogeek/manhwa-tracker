@@ -20,7 +20,7 @@ permissions:
 
 jobs:
   analyze:
-    # Nom stable : c'est lui qu'exige la protection de branche (« Analyze (javascript-typescript) »).
+    # Nom stable : c'est lui qu'exige la protection de branche (« Analyze (python) », etc.).
     name: Analyze (${{ matrix.language }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -35,6 +35,8 @@ jobs:
           # Langages interprétés : analyse du code source, sans compilation ni installation des dépendances.
           - language: javascript-typescript
             build-mode: none
+          - language: python
+            build-mode: none
     steps:
       - uses: actions/checkout@v4
 
@@ -48,6 +50,7 @@ jobs:
           config: |
             paths-ignore:
               - "**/node_modules/**"
+              - "**/.venv/**"
               - "**/dist/**"
               - "**/.next/**"
               - "apps/api/drizzle/**"
