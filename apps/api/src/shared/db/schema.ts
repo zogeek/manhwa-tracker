@@ -190,9 +190,15 @@ export const manhwaTitles = pgTable('manhwa_titles', {
 
 export const authors = pgTable('authors', {
   id: uuid('id').defaultRandom().primaryKey(),
-  name: text('name').notNull(),
+  name: text('name').notNull(), // nom latin affiché (« Chugong »)
+  nativeName: text('native_name'), // nom d'origine (« 추공 ») : la clé la plus fiable entre catalogues
+  // Clé de rapprochement dérivée de l'identité (nom natif, sinon nom latin normalisé) : la même
+  // personne importée d'AniList puis de MangaDex n'est enregistrée qu'une fois.
+  slug: text('slug').notNull(),
   createdAt: createdAt(),
-});
+}, (table) => [
+  uniqueIndex('authors_slug_idx').on(table.slug),
+]);
 
 export const manhwaAuthors = pgTable('manhwa_authors', {
   manhwaId: uuid('manhwa_id')
@@ -202,9 +208,12 @@ export const manhwaAuthors = pgTable('manhwa_authors', {
     .notNull()
     .references(() => authors.id, { onDelete: 'cascade' }),
   role: authorRoleEnum('role').default('both').notNull(),
+  // Ordre d'affichage (0 = auteur principal), tel que fourni par le catalogue d'origine.
+  position: smallint('position').default(0).notNull(),
 }, (table) => [
   primaryKey({ columns: [table.manhwaId, table.authorId] }),
   index('manhwa_authors_author_id_idx').on(table.authorId),
+  check('manhwa_authors_position_positive', sql`${table.position} >= 0`),
 ]);
 
 // ============================================================
