@@ -199,6 +199,7 @@ Worker Python isolé (FastAPI/Playwright) qui poussera ses données vers l'API H
 - 3ᵉ fournisseur Kitsu (preuve de l'Open/Closed : aucune ligne du service modifiée)
 - Frontend découverte : recherche + import depuis les 3 catalogues, fiche détaillée (tags, chapitres, progression), squelettes / toasts / frontière d'erreur, tests composants Vitest
 - Teams de scantrad : identité fournisseur (UUID MangaDex) sur `scanlation_groups`, collaborations via la table de liaison `chapter_release_groups` (ordre de crédit), upsert idempotent partagé par la synchronisation et l'ingestion du scraper (`scanlationGroups[]`), migration avec reprise des crédits existants
+- Affichage des teams : `GET /chapters/manhwa/:id` renvoie chaque chapitre avec ses parutions et teams créditées (2 requêtes groupées, sans N+1) ; la fiche affiche « FR — Asura Scans & Flame Comics » avec lien vers la source (http(s) uniquement), langue seule si aucune team
 - Auteurs (AniList, MangaDex ; Kitsu n'expose pas l'équipe des mangas) dédoublonnés par nom natif, table pivot ordonnée ; couvertures locales exposées par l'API (`localCoverUrl`) et affichées avec repli ; `/settings`
 - Stabilisation : URLs en anglais (`/catalog`, `/library`) avec redirections, boutons de carte responsives, synchronisation des chapitres agnostique (pilotée par les liens de l'œuvre)
 - Progression avancée : saisie directe du chapitre, « Lu jusqu'ici » (mise à jour absolue, sans faux historique), « Annuler », bibliothèque en onglets ; l'API passe une série « à lire » en « en cours » dès qu'on saisit un chapitre
