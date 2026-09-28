@@ -52,7 +52,7 @@ manhwa-tracker/
 ├── apps/
 │   ├── api/              ← Backend Hono + Drizzle + Better Auth (✅ socle sécurisé, testé)
 │   ├── web/              ← Frontend Next.js (✅ branché : proxy, auth, dashboard typé)
-│   └── scraper/          ← Worker Python (🟡 1ʳᵉ source prête : mangas-origines ; contrat généré depuis Zod)
+│   └── scraper/          ← Worker Python (🟡 2 sources prêtes : mangas-origines, scan-manga ; contrat généré depuis Zod)
 ├── packages/             ← Packages partagés (vide)
 ├── CLAUDE.md             ← Règles d'architecture, SOP Git, stratégie de tests
 ├── docker-compose.yml    ← PostgreSQL 16 local (port 5431)
@@ -184,7 +184,8 @@ Worker Python isolé qui pousse ses données vers l'API Hono (`/api/ingest/*`, c
 | `ScrapeRunner` : lots, `scrape_runs` (succeeded / partial / failed), `source_health` (up / degraded / blocked) | ✅ |
 | Thèmes Madara et MangaThemesia (extracteurs complets, testés sur fixtures synthétiques) | ✅ |
 | mangas-origines | ✅ prêt : catalogue, fiche (thème enfant `ori-*`), chapitres dans la fiche ; essai réel de bout en bout vers l'API |
-| Sources astral-manga, scan-manga, rimuscan | 🟡 squelettes (`ready = False`) |
+| scan-manga | ✅ prêt : étage HTTP (curl_cffi) suffisant, découverte par l'accueil (~100 dernières sorties), romans écartés (« hors périmètre », sans dégrader le run) ; essai réel de bout en bout vers l'API |
+| Sources astral-manga, rimuscan | 🟡 squelettes (`ready = False`) |
 | Planification des runs, résolution automatique du `source_id` | ❌ |
 
 ---
@@ -217,6 +218,7 @@ Worker Python isolé qui pousse ses données vers l'API Hono (`/api/ingest/*`, c
 - CI GitHub Actions (PR vers `dev`/`master` : lint → typecheck → tests Vitest → build ; migrations sur Postgres 16 éphémère + drift check), CodeQL JavaScript/TypeScript (`security-extended`, hebdomadaire) et template de PR
 - Scraper : socle Python (voir §5), intégré à la CI (pytest, mypy, Ruff) et à CodeQL
 - Contrat d'ingestion en source unique : Zod → JSON Schema → Pydantic généré, tests anti-dérive ; première source opérationnelle (mangas-origines)
+- Dependabot (npm, uv, GitHub Actions ; PR hebdomadaires vers `dev`, groupées, avec délai de carence anti-paquets piégés) ; deuxième source opérationnelle (scan-manga)
 
 ### 🔴 Priorité suivante — Sécurité & robustesse API
 

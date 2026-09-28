@@ -13,7 +13,7 @@ from uuid import UUID
 from pydantic import ValidationError
 
 from .contract import HealthSample, HealthStatus, IngestBatch, IngestManhwa, RunOutcome
-from .extractors import ExtractionError, SourceExtractor
+from .extractors import ExtractionError, SourceExtractor, UnsupportedSeriesError
 from .fetching import BlockedByAntiBotError, FetchError
 from .ingest_client import IngestClient, IngestError
 
@@ -25,6 +25,7 @@ class RunStats:
     series_found: int = 0
     series_scraped: int = 0
     series_failed: int = 0
+    series_skipped: int = 0
     chapters_sent: int = 0
     batches_sent: int = 0
 
@@ -87,6 +88,9 @@ class ScrapeRunner:
                 stats.series_scraped += 1
             except BlockedByAntiBotError:
                 raise
+            except UnsupportedSeriesError as error:
+                stats.series_skipped += 1
+                logger.info("Fiche hors périmètre ignorée %s : %s", url, error)
             except (FetchError, ExtractionError, ValidationError) as error:
                 stats.series_failed += 1
                 logger.warning("Fiche ignorée %s : %s", url, error)

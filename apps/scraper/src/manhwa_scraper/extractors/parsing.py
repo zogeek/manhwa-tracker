@@ -93,6 +93,14 @@ def parse_chapter_number(label: str) -> Decimal | None:
     return Decimal(match.group(1).replace(",", "."))
 
 
+def parse_chapter_title(label: str) -> str | None:
+    """« Chapitre 12 - Le retour » / « Chapitre 68 : L'invitation » → le titre seul, sinon `None`."""
+    for separator in (" - ", " – ", " : "):
+        if separator in label:
+            return label.split(separator, 1)[1].strip() or None
+    return None
+
+
 def parse_status(label: str | None) -> ManhwaStatus | None:
     if not label:
         return None

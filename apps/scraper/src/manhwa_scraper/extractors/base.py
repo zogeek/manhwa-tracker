@@ -23,6 +23,10 @@ class ExtractionError(RuntimeError):
     """La page a été récupérée mais ne ressemble pas à ce que l'extracteur attend (sélecteur cassé, refonte du site)."""
 
 
+class UnsupportedSeriesError(ExtractionError):
+    """Fiche valide mais hors du catalogue suivi (ex. un roman) : ignorée, sans compter comme un échec."""
+
+
 class SourceExtractor(ABC):
     slug: ClassVar[str]
     """Identifiant stable, utilisé en ligne de commande (`manhwa-scraper run <slug>`)."""

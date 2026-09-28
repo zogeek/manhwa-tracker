@@ -68,6 +68,7 @@ Les fichiers de test vivent à côté du code (`*.spec.ts`) et sont exclus du bu
 3. **`drizzle-zod`** : tout validator dérive de `createInsertSchema(table).omit(...)`, interdiction de dupliquer un schema Zod à la main s'il existe déjà une table Drizzle correspondante.
 4. Avant de créer une nouvelle table, vérifier `shared/db/schema.ts` — ne jamais dupliquer une relation déjà couverte par une table pivot existante.
 5. `.env.example` doit être mis à jour à chaque nouvelle variable d'environnement ajoutée (Better Auth secret, DB pivot, clé scraper...).
+6. **Contrat d'ingestion (Single Source of Truth)** : les validateurs Zod de `apps/api/src/modules/ingestion/ingestion.validator.ts` sont l'unique définition du contrat `/api/ingest/*`. Toute modification de ces validateurs DOIT être suivie de `pnpm contract:generate` (racine du repo), et les deux fichiers générés (`apps/api/contracts/ingestion.schema.json` et `apps/scraper/src/manhwa_scraper/contract.py`) commités dans le même commit. Ne jamais éditer ces fichiers générés à la main : les tests anti-dérive (Vitest côté API, pytest côté scraper) échoueraient, et la CI avec.
 
 # 🗣️ COMMUNICATION & PÉDAGOGIE
 Le développeur superviseur a besoin de clarté.
