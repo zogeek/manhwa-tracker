@@ -11,6 +11,12 @@ Relevé du 2026-09-27 :
   page) et le sitemap est refusé (403 du serveur, réservé aux moteurs). La découverte part donc de l'accueil,
   qui liste côté serveur les ~100 dernières sorties : la source idéale d'un suivi de nouveautés lancé souvent,
   mais pas un inventaire du catalogue historique.
+- Catalogue complet, volontairement NON utilisé (relevé du 2026-09-28) : `liste_series.html` charge en XHR
+  `https://bqj.scan-manga.com/scanlation/scan.data.json` (~2,4 Mo, ~16 000 œuvres, JSON en clair). Un vrai
+  navigateur le reçoit ; un client HTTP avec les mêmes en-têtes (Origin, Referer, Accept) et le même parcours
+  reçoit un 200 au corps VIDE. Seule différence : l'exécution du JavaScript de détection de bots de Cloudflare.
+  Le site réserve donc sciemment cette ressource aux navigateurs (code de la page obfusqué, robots.txt hostile
+  aux robots d'IA) : c'est un refus ciblé de l'extraction en masse, on ne le contourne pas (cf. README, « Éthique »).
 - Fiche : type dans le fil d'Ariane (Manga / Manhwa / Novel…), fiche technique en deux listes parallèles
   (libellés / valeurs), synopsis et couverture en microdonnées schema.org.
 - Chapitres : `li.chapitre` groupés par volume ; les chapitres de tomes parus en France n'ont pas de lien
