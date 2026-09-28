@@ -70,6 +70,13 @@ Les fichiers de test vivent à côté du code (`*.spec.ts`) et sont exclus du bu
 5. `.env.example` doit être mis à jour à chaque nouvelle variable d'environnement ajoutée (Better Auth secret, DB pivot, clé scraper...).
 6. **Contrat d'ingestion (Single Source of Truth)** : les validateurs Zod de `apps/api/src/modules/ingestion/ingestion.validator.ts` sont l'unique définition du contrat `/api/ingest/*`. Toute modification de ces validateurs DOIT être suivie de `pnpm contract:generate` (racine du repo), et les deux fichiers générés (`apps/api/contracts/ingestion.schema.json` et `apps/scraper/src/manhwa_scraper/contract.py`) commités dans le même commit. Ne jamais éditer ces fichiers générés à la main : les tests anti-dérive (Vitest côté API, pytest côté scraper) échoueraient, et la CI avec.
 
+# 🧭 ÉTHIQUE DU SCRAPING (Scraper Python) — Règle Absolue
+Référence complète : section « Éthique et conformité » de `apps/scraper/README.md`.
+1. **Usage :** tracker personnel. Métadonnées et liens uniquement (jamais d'images ni de contenu de chapitre), aucune redistribution, aucun entraînement d'IA.
+2. **`robots.txt` :** à lire **par hôte** avant d'ajouter ou d'étendre une source ; ne jamais viser un chemin `Disallow` applicable à `User-Agent: *`. Les interdictions nommées des robots d'IA (ClaudeBot, GPTBot…) visent les moissonneurs pour modèles : le worker relève de la règle générale, mais ce point doit rester vrai (aucune donnée collectée ne sert à entraîner un modèle).
+3. **Ligne rouge :** l'anti-bot (curl_cffi / Camoufox) sert à passer des filtres **génériques** sur des pages publiques autorisées. Ne jamais contourner un refus **ciblé** d'une ressource aux clients automatisés : sitemap refusé, `scan.data.json` de scan-manga servi vide aux clients HTTP, code obfusqué, jetons, comptes, paywalls. Dans ce cas : s'arrêter, documenter, et proposer une alternative (suivi partiel, liste de séries suivies, demande d'autorisation au site).
+4. **Politesse :** respecter `SCRAPER_REQUEST_INTERVAL_S`, préférer une requête par fiche, arrêter le run au premier blocage anti-bot.
+
 # 🗣️ COMMUNICATION & PÉDAGOGIE
 Le développeur superviseur a besoin de clarté.
 1. **Vulgarise tes résumés.** Concentre-toi sur la valeur concrète (ce que ça change pour l'application et les utilisateurs) plutôt que sur la théorie pure.
