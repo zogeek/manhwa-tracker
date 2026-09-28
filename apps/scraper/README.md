@@ -42,6 +42,45 @@ La politique de validation propre au worker (champs inconnus refusés, modèles 
 `contract_base.py`, classe de base des modèles générés. Les réponses de l'API, qui ne sont pas décrites
 en Zod, restent dans `models.py` (tolérantes aux champs inconnus).
 
+## Éthique et conformité
+
+Ce worker alimente un **tracker personnel** : il suit les sorties de chapitres, il ne constitue pas une copie des sites.
+
+**Ce qu'il collecte et ce qu'il en fait**
+- Uniquement des métadonnées : titre, synopsis, URL de couverture, numéros et **liens** de chapitres. Aucune image
+  de chapitre, aucun contenu de lecture. Chaque chapitre renvoie vers le site source, qui garde son audience.
+- Aucune redistribution publique, aucune revente, **aucun entraînement de modèle d'IA** (le signal
+  `Content-signal: ai-train=no` de scan-manga.com est respecté par construction).
+
+**`robots.txt`**
+- Vérifié **à la main, par hôte**, à l'ajout de chaque source (`www.` et un sous-domaine ont chacun le leur ; le
+  worker ne le lit pas encore automatiquement). Aucun extracteur ne vise un chemin `Disallow` applicable à
+  `User-Agent: *` (ex. `/*.php?*` sur scan-manga.com).
+- scan-manga.com interdit nommément les robots d'IA (GPTBot, ClaudeBot…). Ce worker n'en est pas un : il ne
+  moissonne pas le web pour un modèle, il consulte quelques pages pour son propriétaire. Il relève de la règle
+  générale (`User-Agent: *` → `Allow: /`).
+- Un `robots.txt` indisponible (4xx) vaut « pas de restriction » (RFC 9309, §2.3.1.3) ; une indisponibilité 5xx
+  vaut « tout est interdit ».
+
+**Politesse**
+- Au plus une requête toutes les 1,5 s par site (`SCRAPER_REQUEST_INTERVAL_S`), une seule requête par fiche quand
+  c'est possible, découverte limitée aux dernières sorties plutôt qu'au catalogue entier.
+- Un blocage anti-bot arrête le run immédiatement (source marquée `blocked`) : on n'insiste pas.
+
+**Ligne rouge : on ne contourne jamais un refus ciblé**
+
+L'étage curl_cffi / Camoufox sert à passer les filtres **génériques** (un pare-feu qui rejette tout client non
+navigateur sur des pages que le site sert à tout le monde et que son `robots.txt` autorise). En revanche, quand le
+site refuse **délibérément une ressource précise** aux clients automatisés, on s'arrête. Exemples relevés sur
+scan-manga.com :
+- le sitemap, refusé (403) hors moteurs de recherche ;
+- `scan.data.json` (catalogue complet de ~16 000 œuvres), servi aux navigateurs mais **vide** pour un client HTTP
+  aux en-têtes identiques, derrière un code JavaScript obfusqué ;
+- plus généralement : pas de désobfuscation de code, pas de jeton rejoué, pas de compte ni de paywall contourné.
+
+Si une source ne peut pas être suivie dans ces limites, on la suit partiellement (dernières sorties) ou pas du tout,
+et on peut toujours demander l'autorisation à ses administrateurs.
+
 ## Stack
 
 | Besoin | Choix | Pourquoi |
