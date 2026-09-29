@@ -6,11 +6,11 @@ import pytest
 from selectolax.lexbor import LexborHTMLParser
 
 from manhwa_scraper.contract import IngestManhwa, RunOutcome
-from manhwa_scraper.extractors import UnsupportedSeriesError
+from manhwa_scraper.extractors import SeriesLink, UnsupportedDiscoveryError, UnsupportedSeriesError
 from manhwa_scraper.extractors.themes import MadaraExtractor
 from manhwa_scraper.fetching import FetchError
 from manhwa_scraper.ingest_client import IngestClient, create_http_client
-from manhwa_scraper.pipeline import ScrapeRunner
+from manhwa_scraper.pipeline import ScrapeRunner, explicit_urls
 
 from .fakes import FakeFetcher, FakeIngestApi, blocked, fixture, no_sleep
 
@@ -19,12 +19,20 @@ CATALOG_1 = "https://scan.test/manga/?m_orderby=latest"
 CATALOG_2 = "https://scan.test/manga/page/2/?m_orderby=latest"
 NECRO = "https://scan.test/manga/necro/"
 SOLO = "https://scan.test/manga/solo/"
+TOP = "https://scan.test/top/"
 
 
 class DemoMadara(MadaraExtractor):
     slug: ClassVar[str] = "demo"
     name: ClassVar[str] = "Démo"
     base_url: ClassVar[str] = "https://scan.test/"
+
+
+class DemoMadaraWithTop(DemoMadara):
+    top_page_url: ClassVar[str | None] = TOP
+
+    def parse_top(self, document: LexborHTMLParser, page_url: str) -> list[SeriesLink]:
+        return [SeriesLink(title=link.text(), url=link.attributes.get("href") or "") for link in document.css("a")]
 
 
 @pytest.fixture
@@ -147,3 +155,39 @@ async def test_an_unexpected_error_still_closes_the_run(api: FakeIngestApi, inge
         await runner(fetcher, ingest).run()
 
     assert api.bodies("PATCH", f"/api/ingest/runs/{api.run_id}")[0]["status"] == "failed"
+
+
+async def test_explicit_urls_scrape_only_the_given_series(
+    api: FakeIngestApi, fetcher: FakeFetcher, ingest: IngestClient
+) -> None:
+    targets = explicit_urls([NECRO, NECRO])  # doublon d'un fichier de suivi : une seule requête
+
+    report = await ScrapeRunner(
+        DemoMadara(fetcher), ingest, source_id=SOURCE_ID, worker_version="test", targets=targets
+    ).run()
+
+    assert report.outcome == RunOutcome.succeeded
+    assert [call.url for call in fetcher.calls] == [NECRO]  # aucun passage par le catalogue
+    [batch] = api.bodies("POST", "/api/ingest/batches")
+    assert [manhwa["sourceManhwaUrl"] for manhwa in batch["manhwas"]] == [NECRO]
+
+
+async def test_a_top_run_scrapes_the_ranked_series(
+    api: FakeIngestApi, fetcher: FakeFetcher, ingest: IngestClient
+) -> None:
+    fetcher.add(TOP, f'<html><body><a href="{NECRO}">Necro</a></body></html>')
+    extractor = DemoMadaraWithTop(fetcher)
+
+    report = await ScrapeRunner(
+        extractor, ingest, source_id=SOURCE_ID, worker_version="test", targets=extractor.discover_top()
+    ).run()
+
+    assert report.outcome == RunOutcome.succeeded
+    assert [call.url for call in fetcher.calls] == [TOP, NECRO]
+    assert report.stats.series_scraped == 1
+
+
+async def test_a_source_without_top_refuses_the_top_discovery(fetcher: FakeFetcher) -> None:
+    with pytest.raises(UnsupportedDiscoveryError):
+        [url async for url in DemoMadara(fetcher).discover_top()]
+    assert fetcher.calls == []

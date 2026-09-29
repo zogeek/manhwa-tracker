@@ -1,11 +1,14 @@
-"""Orchestration d'un run : catalogue → fiches → lots vers l'API, avec télémétrie (`scrape_runs`, `source_health`).
+"""Orchestration d'un run : cibles → fiches → lots vers l'API, avec télémétrie (`scrape_runs`, `source_health`).
+
+Les cibles viennent par défaut du catalogue de la source (`discover`, dernières sorties) ; on peut en fournir
+d'autres : le « Top » du site (`discover_top`) ou une liste d'URLs explicites (`explicit_urls`, séries suivies).
 
 Une fiche qui échoue n'arrête pas le run (il finit `partial`) ; un blocage anti-bot, si : insister
 ne ferait qu'aggraver le bannissement, on s'arrête et on signale la source `blocked`.
 """
 
 import logging
-from collections.abc import Callable
+from collections.abc import AsyncIterable, AsyncIterator, Callable, Iterable
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from uuid import UUID
@@ -48,6 +51,7 @@ class ScrapeRunner:
         worker_version: str,
         batch_size: int = 20,
         max_series: int | None = None,
+        targets: AsyncIterable[str] | None = None,
         now: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self._extractor = extractor
@@ -56,6 +60,7 @@ class ScrapeRunner:
         self._worker_version = worker_version
         self._batch_size = batch_size
         self._max_series = max_series
+        self._targets = targets if targets is not None else extractor.discover()
         self._now = now
 
     async def run(self) -> RunReport:
@@ -79,7 +84,7 @@ class ScrapeRunner:
 
     async def _scrape(self, run_id: UUID, stats: RunStats) -> None:
         pending: list[IngestManhwa] = []
-        async for url in self._extractor.discover():
+        async for url in self._targets:
             if self._max_series is not None and stats.series_found >= self._max_series:
                 break
             stats.series_found += 1
@@ -134,9 +139,15 @@ class ScrapeRunner:
             logger.warning("Santé de la source non enregistrée : %s", error)
 
 
+async def explicit_urls(urls: Iterable[str]) -> AsyncIterator[str]:
+    """Cibles d'un run « URL directe » : les fiches données, sans doublon, sans passer par un catalogue."""
+    for url in dict.fromkeys(urls):
+        yield url
+
+
 def _conclude(run_id: UUID, stats: RunStats) -> RunReport:
     if stats.series_found == 0:
-        # Un catalogue vide est presque toujours un sélecteur cassé (refonte du site), pas un site vide.
+        # Un catalogue (ou un Top) vide est presque toujours un sélecteur cassé (refonte du site), pas un site vide.
         return RunReport(run_id, RunOutcome.failed, stats, "Catalogue vide : sélecteurs à vérifier")
     if stats.series_failed == 0:
         return RunReport(run_id, RunOutcome.succeeded, stats)
