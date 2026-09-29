@@ -1,10 +1,10 @@
-"""scan-manga.com : site maison, découverte par l'accueil, romans écartés, tomes licenciés ignorés."""
+"""scan-manga.com : découverte par l'accueil (dernières sorties ou Top), romans et tomes licenciés écartés."""
 
 import pytest
 from selectolax.lexbor import LexborHTMLParser
 
 from manhwa_scraper.contract import ManhwaStatus, ManhwaType
-from manhwa_scraper.extractors import UnsupportedSeriesError
+from manhwa_scraper.extractors import ExtractionError, UnsupportedSeriesError
 from manhwa_scraper.extractors.sites import default_registry
 from manhwa_scraper.extractors.sites.scan_manga import ScanMangaExtractor
 
@@ -69,3 +69,35 @@ async def test_novels_are_out_of_scope() -> None:
 
     with pytest.raises(UnsupportedSeriesError, match="Novel"):
         await ScanMangaExtractor(fetcher).scrape_series(SERIES)
+
+
+def test_reads_the_top_ranking_of_the_right_column_only() -> None:
+    links = ScanMangaExtractor(FakeFetcher()).parse_top(LexborHTMLParser(fixture("scan_manga_home.html")), HOME)
+
+    # Classement BD uniquement (le Top novels est hors périmètre), liens relatifs résolus, dans l'ordre du rang.
+    assert [(link.title, link.url) for link in links] == [
+        ("Populaire Mais Pas Nouveau", "https://www.scan-manga.com/999/Populaire-Mais-Pas-Nouveau.html"),
+        ("Le Royaume", "https://www.scan-manga.com/1805-54398/Le-Royaume.html"),
+        ("Populaire Mais Pas Nouveau", "https://www.scan-manga.com/999/Populaire-Mais-Pas-Nouveau.html"),
+    ]
+
+
+async def test_discovers_the_top_in_a_single_request() -> None:
+    fetcher = FakeFetcher()
+    fetcher.add(HOME, fixture("scan_manga_home.html"))
+
+    urls = [url async for url in ScanMangaExtractor(fetcher).discover_top()]
+
+    assert urls == [
+        "https://www.scan-manga.com/999/Populaire-Mais-Pas-Nouveau.html",
+        "https://www.scan-manga.com/1805-54398/Le-Royaume.html",
+    ]
+    assert [call.url for call in fetcher.calls] == [HOME]
+
+
+async def test_a_missing_top_block_is_an_extraction_error() -> None:
+    fetcher = FakeFetcher()
+    fetcher.add(HOME, "<html><body><div id='right_fixed'></div></body></html>")
+
+    with pytest.raises(ExtractionError, match="Top"):
+        [url async for url in ScanMangaExtractor(fetcher).discover_top()]
