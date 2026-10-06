@@ -10,6 +10,7 @@ Les méthodes `parse_*` sont pures (HTML → modèles) : on les teste sur des fi
 
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from typing import ClassVar
 from urllib.parse import urlsplit
 
@@ -27,6 +28,18 @@ class UnsupportedSeriesError(ExtractionError):
     """Fiche valide mais hors du catalogue suivi (ex. un roman) : ignorée, sans compter comme un échec."""
 
 
+class UnsupportedDiscoveryError(LookupError):
+    """La source n'expose pas ce mode de découverte (ex. pas de « Top » servi côté serveur)."""
+
+
+@dataclass(frozen=True, slots=True)
+class SeriesLink:
+    """Œuvre repérée sur une page de listing, avant téléchargement de sa fiche."""
+
+    title: str
+    url: str
+
+
 class SourceExtractor(ABC):
     slug: ClassVar[str]
     """Identifiant stable, utilisé en ligne de commande (`manhwa-scraper run <slug>`)."""
@@ -38,6 +51,8 @@ class SourceExtractor(ABC):
     """`False` tant que les sélecteurs n'ont pas été validés sur le site réel : la CLI refuse de le lancer."""
     max_catalog_pages: ClassVar[int] = 500
     """Garde-fou contre une pagination qui ne s'arrête jamais (page « suivante » qui boucle)."""
+    top_page_url: ClassVar[str | None] = None
+    """Page qui porte le « Top » des œuvres populaires ; `None` = la source n'en expose pas (voir `parse_top`)."""
 
     def __init__(self, fetcher: PageFetcher) -> None:
         self._fetcher = fetcher
@@ -71,6 +86,17 @@ class SourceExtractor(ABC):
                 seen.add(url)
                 yield url
 
+    async def discover_top(self) -> AsyncIterator[str]:
+        """URLs des œuvres du « Top » du site, dans l'ordre du classement : une seule requête."""
+        if self.top_page_url is None:
+            raise UnsupportedDiscoveryError(f"La source « {self.slug} » n'expose pas de Top")
+        result = await self._fetcher.fetch(self.top_page_url)
+        seen: set[str] = set()
+        for link in self.parse_top(LexborHTMLParser(result.html), result.url):
+            if link.url not in seen:
+                seen.add(link.url)
+                yield link.url
+
     async def scrape_series(self, url: str) -> IngestManhwa:
         result = await self._fetcher.fetch(url)
         document = LexborHTMLParser(result.html)
@@ -84,6 +110,10 @@ class SourceExtractor(ABC):
         return self.parse_chapters(document, series_url)
 
     # ---- Étapes propres à chaque CMS / site ----
+
+    def parse_top(self, document: LexborHTMLParser, page_url: str) -> list[SeriesLink]:
+        """Œuvres du « Top » de `top_page_url`. À surcharger avec `top_page_url` par les sources qui en ont un."""
+        raise UnsupportedDiscoveryError(f"La source « {self.slug} » n'expose pas de Top")
 
     @abstractmethod
     def catalog_page_url(self, page: int) -> str:

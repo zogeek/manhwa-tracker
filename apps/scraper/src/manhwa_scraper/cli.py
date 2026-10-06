@@ -1,15 +1,18 @@
 """Point d'entrée et composition root : seul module qui instancie les implémentations concrètes.
 
 manhwa-scraper                         # liste les sources connues (défaut)
-manhwa-scraper run <slug> --source-id <uuid> [--max-series N]
+manhwa-scraper run <slug> --source-id <uuid> [--discovery latest|top] [--max-series N]
+manhwa-scraper track --source-id <uuid> [<url> ...] [--urls-file fichier.txt]
 """
 
 import argparse
 import asyncio
 import logging
 import sys
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import AsyncExitStack
+from pathlib import Path
+from typing import Literal
 from uuid import UUID
 
 from pydantic import ValidationError
@@ -17,13 +20,17 @@ from pydantic import ValidationError
 from . import __version__
 from .config import Settings, load_settings
 from .contract import RunOutcome
-from .extractors import SourceExtractor, UnknownSourceError
+from .extractors import SourceExtractor, UnknownSourceError, UnsupportedDiscoveryError
 from .extractors.sites import default_registry
 from .fetching import ThrottledFetcher, TieredFetcher
 from .fetching.browser import CamoufoxFetcher
 from .fetching.http import CurlCffiFetcher
 from .ingest_client import IngestClient, create_http_client
-from .pipeline import RunReport, ScrapeRunner
+from .pipeline import RunReport, ScrapeRunner, explicit_urls
+
+Discovery = Literal["latest", "top"]
+Targets = Callable[[SourceExtractor], AsyncIterator[str]]
+"""Cibles d'un run, calculées une fois l'extracteur construit (il porte le fetcher)."""
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -34,8 +41,53 @@ def _parser() -> argparse.ArgumentParser:
     run = commands.add_parser("run", help="scrape une source et pousse les données vers l'API")
     run.add_argument("slug", help="slug de la source (voir `sources`)")
     run.add_argument("--source-id", type=UUID, required=True, help="UUID de la source dans l'API (table `sources`)")
+    run.add_argument(
+        "--discovery",
+        choices=("latest", "top"),
+        default="latest",
+        help="latest : dernières sorties (défaut) ; top : œuvres du classement « Top » du site",
+    )
     run.add_argument("--max-series", type=int, default=None, help="limite le nombre de fiches (essais)")
+    track = commands.add_parser("track", help="scrape uniquement les fiches données (séries suivies), sans catalogue")
+    track.add_argument("urls", nargs="*", metavar="url", help="URL de fiche ; la source est déduite du domaine")
+    track.add_argument(
+        "--urls-file", type=Path, default=None, help="fichier d'URLs, une par ligne (lignes vides et # ignorées)"
+    )
+    track.add_argument("--source-id", type=UUID, required=True, help="UUID de la source dans l'API (table `sources`)")
+    track.add_argument("--max-series", type=int, default=None, help="limite le nombre de fiches (essais)")
     return parser
+
+
+def _read_urls_file(path: Path) -> list[str]:
+    lines = (line.strip() for line in path.read_text(encoding="utf-8").splitlines())
+    return [line for line in lines if line and not line.startswith("#")]
+
+
+def _discovery(mode: Discovery) -> Targets:
+    if mode == "top":
+        return lambda extractor: extractor.discover_top()
+    return lambda extractor: extractor.discover()
+
+
+def _tracked(urls: list[str]) -> Targets:
+    return lambda _extractor: explicit_urls(urls)
+
+
+def _resolve(args: argparse.Namespace) -> tuple[type[SourceExtractor], Targets]:
+    """Extracteur et cibles du run demandé. Lève une `UnknownSourceError` / `UnsupportedDiscoveryError` sinon."""
+    registry = default_registry()
+    if args.command == "track":
+        urls: list[str] = [*args.urls, *(_read_urls_file(args.urls_file) if args.urls_file else [])]
+        extractor_cls = registry.for_urls(urls)
+        targets = _tracked(urls)
+    else:
+        extractor_cls = registry.get(args.slug)
+        if args.discovery == "top" and extractor_cls.top_page_url is None:
+            raise UnsupportedDiscoveryError(f"La source « {extractor_cls.slug} » n'expose pas de Top")
+        targets = _discovery(args.discovery)
+    if not extractor_cls.ready:
+        raise UnknownSourceError(f"La source « {extractor_cls.slug} » n'est encore qu'un squelette (ready = False)")
+    return extractor_cls, targets
 
 
 def _print_sources() -> None:
@@ -45,7 +97,11 @@ def _print_sources() -> None:
 
 
 async def _run(
-    settings: Settings, extractor_cls: type[SourceExtractor], source_id: UUID, max_series: int | None
+    settings: Settings,
+    extractor_cls: type[SourceExtractor],
+    targets: Targets,
+    source_id: UUID,
+    max_series: int | None,
 ) -> RunReport:
     async with AsyncExitStack() as stack:
         http_fetcher = await stack.enter_async_context(CurlCffiFetcher(timeout_s=settings.page_timeout_ms / 1000))
@@ -58,13 +114,15 @@ async def _run(
         api = await stack.enter_async_context(
             create_http_client(str(settings.api_url), settings.api_key.get_secret_value())
         )
+        extractor = extractor_cls(fetcher)
         runner = ScrapeRunner(
-            extractor_cls(fetcher),
+            extractor,
             IngestClient(api),
             source_id=source_id,
             worker_version=__version__,
             batch_size=settings.batch_size,
             max_series=max_series,
+            targets=targets(extractor),
         )
         return await runner.run()
 
@@ -76,15 +134,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     try:
-        extractor_cls = default_registry().get(args.slug)
-        if not extractor_cls.ready:
-            raise UnknownSourceError(f"La source « {args.slug} » n'est encore qu'un squelette (ready = False)")
+        extractor_cls, targets = _resolve(args)
         settings = load_settings()
-    except (UnknownSourceError, ValidationError) as error:
+    except (UnknownSourceError, UnsupportedDiscoveryError, ValidationError, OSError) as error:
         print(error, file=sys.stderr)
         return 2
 
     logging.basicConfig(level=settings.log_level, format="%(asctime)s %(levelname)s %(name)s — %(message)s")
-    report = asyncio.run(_run(settings, extractor_cls, args.source_id, args.max_series))
+    report = asyncio.run(_run(settings, extractor_cls, targets, args.source_id, args.max_series))
     logging.getLogger(__name__).info("Run %s terminé : %s %s", report.run_id, report.outcome, report.stats)
     return 0 if report.outcome is not RunOutcome.failed else 1

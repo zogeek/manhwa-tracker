@@ -5,6 +5,7 @@ import pytest
 from manhwa_scraper.extractors import ExtractorRegistry, SourceExtractor, UnknownSourceError
 from manhwa_scraper.extractors.sites import ALL_SOURCES, default_registry
 from manhwa_scraper.extractors.sites.mangas_origines import MangasOriginesExtractor
+from manhwa_scraper.extractors.sites.scan_manga import ScanMangaExtractor
 from manhwa_scraper.extractors.themes import MadaraExtractor
 
 from .fakes import FakeFetcher
@@ -36,6 +37,24 @@ def test_resolves_a_source_from_any_of_its_urls() -> None:
     assert registry.for_url("https://www.mangas-origines.fr/oeuvre/solo/") is MangasOriginesExtractor
     with pytest.raises(UnknownSourceError):
         registry.for_url("https://inconnu.test/")
+
+
+def test_resolves_the_single_source_of_a_list_of_urls() -> None:
+    urls = ["https://www.scan-manga.com/1805/Le-Royaume.html", "https://scan-manga.com/17231/La-Tour.html"]
+    assert default_registry().for_urls(urls) is ScanMangaExtractor
+
+
+@pytest.mark.parametrize(
+    ("urls", "message"),
+    [
+        ([], "Aucune URL"),
+        (["https://www.scan-manga.com/1/A.html", "https://mangas-origines.fr/oeuvre/b/"], "même source"),
+        (["https://www.scan-manga.com/1/A.html", "https://inconnu.test/"], "inconnu.test"),
+    ],
+)
+def test_rejects_url_lists_without_a_single_known_source(urls: list[str], message: str) -> None:
+    with pytest.raises(UnknownSourceError, match=message):
+        default_registry().for_urls(urls)
 
 
 def test_factory_injects_the_fetcher() -> None:

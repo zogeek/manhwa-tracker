@@ -1,6 +1,6 @@
 """Registre des sources (pattern Factory) : du slug ou de l'URL à l'extracteur prêt à l'emploi."""
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 
 from ..fetching import PageFetcher
 from .base import SourceExtractor
@@ -33,6 +33,18 @@ class ExtractorRegistry:
             if extractor.handles(url):
                 return extractor
         raise UnknownSourceError(f"Aucune source ne gère {url}")
+
+    def for_urls(self, urls: Sequence[str]) -> type[SourceExtractor]:
+        """Source commune à toutes les `urls` (un run = une source : il est rattaché à une ligne de `sources`)."""
+        if not urls:
+            raise UnknownSourceError("Aucune URL fournie")
+        by_source: dict[type[SourceExtractor], list[str]] = {}
+        for url in urls:
+            by_source.setdefault(self.for_url(url), []).append(url)
+        if len(by_source) > 1:
+            detail = " ; ".join(f"{extractor.slug} : {len(found)} URL(s)" for extractor, found in by_source.items())
+            raise UnknownSourceError(f"Les URLs doivent toutes appartenir à la même source ({detail})")
+        return next(iter(by_source))
 
     def create(self, slug: str, fetcher: PageFetcher) -> SourceExtractor:
         return self.get(slug)(fetcher)
