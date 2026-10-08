@@ -1,4 +1,4 @@
-"""Dorking via Brave Search : l'API est simulée par `httpx.MockTransport`, aucun appel réel ni quota consommé."""
+"""Dorking : SearXNG et Brave sont simulés par `httpx.MockTransport`, aucun appel réel ni quota consommé."""
 
 import json
 from collections.abc import AsyncIterator
@@ -13,8 +13,10 @@ from manhwa_scraper.search import (
     BraveSearchEngine,
     SearchError,
     SearchResult,
+    SearxngSearchEngine,
     SeriesFinder,
     create_brave_client,
+    create_searxng_client,
     dork_query,
 )
 
@@ -121,6 +123,103 @@ class TestBraveSearchEngine:
         async with create_brave_client(KEY, transport=httpx.MockTransport(refuse)) as http:
             with pytest.raises(SearchError, match="injoignable"):
                 await BraveSearchEngine(http).search("x", count=5)
+
+
+SEARXNG = "http://searx.test/searxng"
+
+
+@dataclass
+class FakeSearxng:
+    """Fausse instance SearXNG : `GET /searxng/search?format=json` → `status` + `body`."""
+
+    status: int = 200
+    body: object = field(default_factory=lambda: {"query": "x", "results": []})
+    requests: list[httpx.Request] = field(default_factory=list)
+
+    def transport(self) -> httpx.MockTransport:
+        return httpx.MockTransport(self._handle)
+
+    def _handle(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        if request.url.path != "/searxng/search":
+            return httpx.Response(404)
+        return httpx.Response(self.status, content=json.dumps(self.body))
+
+
+@pytest.fixture
+def searxng() -> FakeSearxng:
+    return FakeSearxng()
+
+
+@pytest.fixture
+async def searxng_engine(searxng: FakeSearxng) -> AsyncIterator[SearxngSearchEngine]:
+    async with create_searxng_client(SEARXNG, transport=searxng.transport()) as http:
+        yield SearxngSearchEngine(http)
+
+
+class TestSearxngSearchEngine:
+    async def test_queries_the_json_api_under_the_instance_path(
+        self, searxng: FakeSearxng, searxng_engine: SearxngSearchEngine
+    ) -> None:
+        await searxng_engine.search('site:scan-manga.com "Solo Leveling"', count=5)
+
+        (request,) = searxng.requests
+        assert (request.url.host, request.url.path) == ("searx.test", "/searxng/search")
+        assert request.url.params["q"] == 'site:scan-manga.com "Solo Leveling"'
+        assert request.url.params["format"] == "json"
+        assert "X-Subscription-Token" not in request.headers  # aucun compte, aucune clé
+
+    async def test_returns_results_in_order_truncated_to_count(
+        self, searxng: FakeSearxng, searxng_engine: SearxngSearchEngine
+    ) -> None:
+        searxng.body = {
+            "query": "x",
+            "number_of_results": 0,
+            "results": [
+                {"title": "A", "url": "https://a.test/", "engine": "brave", "score": 2.0, "content": "…"},
+                {"title": "B", "url": "https://b.test/", "engines": ["mojeek"]},
+                {"title": "C", "url": "https://c.test/"},
+            ],
+            "answers": [],
+            "infoboxes": [],
+        }
+
+        assert await searxng_engine.search("x", count=2) == [
+            SearchResult("A", "https://a.test/"),
+            SearchResult("B", "https://b.test/"),
+        ]
+
+    async def test_a_disabled_json_format_explains_the_fix(
+        self, searxng: FakeSearxng, searxng_engine: SearxngSearchEngine
+    ) -> None:
+        searxng.status = 403
+
+        with pytest.raises(SearchError, match=r"search\.formats") as error:
+            await searxng_engine.search("x", count=5)
+        assert error.value.status == 403
+
+    async def test_rate_limiting_is_an_error(self, searxng: FakeSearxng, searxng_engine: SearxngSearchEngine) -> None:
+        searxng.status = 429
+
+        with pytest.raises(SearchError) as error:
+            await searxng_engine.search("x", count=5)
+        assert error.value.status == 429
+
+    async def test_an_unexpected_body_is_an_error(
+        self, searxng: FakeSearxng, searxng_engine: SearxngSearchEngine
+    ) -> None:
+        searxng.body = {"results": [{"title": "sans url"}]}
+
+        with pytest.raises(SearchError, match="inattendue"):
+            await searxng_engine.search("x", count=5)
+
+    async def test_an_unreachable_instance_is_an_error(self) -> None:
+        def refuse(request: httpx.Request) -> httpx.Response:
+            raise httpx.ConnectError("refusé", request=request)
+
+        async with create_searxng_client(SEARXNG, transport=httpx.MockTransport(refuse)) as http:
+            with pytest.raises(SearchError, match="injoignable"):
+                await SearxngSearchEngine(http).search("x", count=5)
 
 
 class TestDorkQuery:
