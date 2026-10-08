@@ -13,12 +13,30 @@ pnpm --filter scraper dev       # liste les sources et leur état
 uv run manhwa-scraper run <slug> --source-id <uuid-de-la-source> [--max-series 5]
 ```
 
+Deux modes de scraping, même déroulé (fiches → lots → `/api/ingest`) :
+
+```sh
+# Découverte : les dernières sorties du catalogue de la source.
+uv run manhwa-scraper run scan-manga --source-id <uuid>
+# Séries suivies : uniquement ces fiches (un lien de chapitre est ramené à sa fiche).
+uv run manhwa-scraper track https://www.scan-manga.com/1805-54398/Le-Royaume.html --source-id <uuid>
+# Trouver l'URL d'une fiche par son titre (dorking via l'API Brave Search, BRAVE_SEARCH_API_KEY requis).
+uv run manhwa-scraper search scan-manga "Le Royaume"
+# Les deux enchaînés :
+uv run manhwa-scraper track "$(uv run manhwa-scraper search scan-manga 'Le Royaume')" --source-id <uuid>
+```
+
+`search` pose `site:scan-manga.com "Le Royaume"` à Brave et garde le premier résultat que l'extracteur reconnaît
+comme une fiche (`SourceExtractor.series_url`). Le site cible ne reçoit aucune requête. Une recherche par œuvre
+suffit (l'URL est ensuite stockée côté API et partagée par tous les utilisateurs) : l'offre gratuite de Brave
+(~2 000 requêtes/mois) couvre l'usage. Au-delà, `SearchEngine` est un protocole : un SearXNG auto-hébergé s'y branche.
+
 | Script | Rôle |
 |---|---|
-| `dev` | `manhwa-scraper` : liste les sources (`sources`) ; `run <slug>` lance un scraping |
+| `dev` | `manhwa-scraper` : liste les sources (`sources`) ; `run <slug>` (découverte), `track <url>…` (séries suivies), `search <slug> "<titre>"` |
 | `lint` / `format` | Ruff (lint + formatage) |
 | `typecheck` | mypy `--strict` (plugin Pydantic) |
-| `test` | pytest — aucun réseau, aucun navigateur (fakes + fixtures HTML synthétiques) |
+| `test` | pytest — aucun réseau, aucun navigateur (fakes + fixtures HTML synthétiques ; Brave simulé par `httpx.MockTransport`) |
 | `contract:generate` | Régénère `contract.py` depuis le JSON Schema de l'API (datamodel-codegen) |
 
 ## Contrat avec l'API : source unique de vérité
@@ -78,6 +96,17 @@ scan-manga.com :
   aux en-têtes identiques, derrière un code JavaScript obfusqué ;
 - plus généralement : pas de désobfuscation de code, pas de jeton rejoué, pas de compte ni de paywall contourné.
 
+Même règle pour les services tiers. Recherche par « dorking » (`site:scan-manga.com "Titre"`) sur DuckDuckGo,
+évaluée puis **écartée** (relevé du 2026-10-06) : le `robots.txt` de `html.duckduckgo.com` et
+`lite.duckduckgo.com` autorise tout, mais une requête automatisée honnête (User-Agent du worker, sans
+déguisement) reçoit un HTTP 202 contenant un CAPTCHA (« Unfortunately, bots use DuckDuckGo too »). C'est un refus
+ciblé des clients automatisés : le franchir avec curl_cffi / Camoufox serait exactement ce qu'on s'interdit. Pistes
+conformes retenues : l'API officielle de Brave Search (clé, quota, automatisation autorisée) pour `search`, et
+l'URL collée à la main pour `track`.
+
+Exemple de correction : mangas-origines.fr interdit `/*?m_orderby=` ; la découverte demande donc `/oeuvre/`
+sans paramètre (tri par défaut = dernières sorties) au lieu de `?m_orderby=latest`.
+
 Si une source ne peut pas être suivie dans ces limites, on la suit partiellement (dernières sorties) ou pas du tout,
 et on peut toujours demander l'autorisation à ses administrateurs.
 
@@ -103,7 +132,8 @@ src/manhwa_scraper/
 ├── contract_base.py       politique de validation du worker (base des modèles générés)
 ├── models.py              réponses de l'API + sérialisation camelCase
 ├── ingest_client.py       client HTTP de l'API (clé de service, ré-essais, idempotence)
-├── pipeline.py            ScrapeRunner : catalogue → fiches → lots, scrape_runs + source_health
+├── pipeline.py            ScrapeRunner : catalogue ou séries suivies → fiches → lots, scrape_runs + source_health
+├── search.py              dorking : SearchEngine (protocole), BraveSearchEngine, SeriesFinder
 ├── fetching/
 │   ├── base.py            PageFetcher (protocole), FetchResult, détection des challenges
 │   ├── http.py            CurlCffiFetcher   (étage rapide)
