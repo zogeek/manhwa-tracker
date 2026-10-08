@@ -12,6 +12,7 @@ import {
   recordHealthSchema,
   runIdParamSchema,
   startRunSchema,
+  trackedSeriesQuerySchema,
 } from './ingestion.validator.js';
 
 const MAX_BODY_BYTES = 5 * 1024 * 1024;
@@ -32,6 +33,10 @@ export const createIngestionRoutes = (service: IngestionService, { requireApiKey
         },
       }),
     )
+    .get('/tracked', validate('query', trackedSeriesQuerySchema), async (c) => {
+      const page = await service.listTrackedSeries(c.req.valid('query'));
+      return c.json(page, 200);
+    })
     .post(
       '/batches',
       validate('header', idempotencyHeaderSchema),
