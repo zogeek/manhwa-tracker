@@ -2,7 +2,14 @@ import { randomUUID } from 'node:crypto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { TransactionRunner } from '../../shared/db/transaction.js';
 import { ConflictError, NotFoundError } from '../../shared/lib/errors.js';
-import type { IngestionRepository, ManhwaSourceLink, TeamInput, UpsertedRelease } from './ingestion.repository.js';
+import type {
+  IngestionRepository,
+  ManhwaSourceLink,
+  TeamInput,
+  TrackedSeries,
+  TrackedSeriesPageQuery,
+  UpsertedRelease,
+} from './ingestion.repository.js';
 import type {
   IngestionBatch,
   NewChapterRelease,
@@ -138,6 +145,16 @@ class InMemoryIngestionRepository implements IngestionRepository {
   async insertHealthSamples(samples: unknown[]): Promise<number> {
     return samples.length;
   }
+
+  /** Œuvres suivies par source, déjà filtrées (le filtrage SQL est couvert par les tests de route). */
+  readonly tracked = new Map<string, TrackedSeries[]>();
+
+  async findTrackedSeries(sourceId: string, { cursor, limit }: TrackedSeriesPageQuery): Promise<TrackedSeries[]> {
+    return (this.tracked.get(sourceId) ?? [])
+      .filter((series) => cursor === undefined || series.manhwaId > cursor)
+      .sort((a, b) => a.manhwaId.localeCompare(b.manhwaId))
+      .slice(0, limit);
+  }
 }
 
 describe('IngestionService', () => {
@@ -213,6 +230,49 @@ describe('IngestionService', () => {
       await expect(service.finishRun(run.id, { status: 'succeeded' })).resolves.toMatchObject({ status: 'succeeded' });
       await expect(service.finishRun(run.id, { status: 'failed' })).rejects.toBeInstanceOf(ConflictError);
       await expect(service.finishRun(randomUUID(), { status: 'failed' })).rejects.toBeInstanceOf(NotFoundError);
+    });
+  });
+
+  describe('listTrackedSeries', () => {
+    const series = (manhwaId: string): TrackedSeries => ({
+      manhwaId,
+      title: `Série ${manhwaId.slice(0, 4)}`,
+      manhwaUrl: null,
+      latestChapter: null,
+      lastScrapedAt: null,
+    });
+    const ids = ['10000000-0000-4000-8000-000000000000', '20000000-0000-4000-8000-000000000000', '30000000-0000-4000-8000-000000000000'];
+
+    beforeEach(() => {
+      repo.tracked.set(sourceId, ids.map(series));
+    });
+
+    it('rejects an unknown source', async () => {
+      await expect(service.listTrackedSeries({ sourceId: randomUUID(), limit: 10 })).rejects.toBeInstanceOf(NotFoundError);
+    });
+
+    it('returns everything with no cursor when the page is not full', async () => {
+      const page = await service.listTrackedSeries({ sourceId, limit: 10 });
+
+      expect(page.data.map((s) => s.manhwaId)).toEqual(ids);
+      expect(page.nextCursor).toBeNull();
+    });
+
+    it('returns no cursor when the last page is exactly full', async () => {
+      const page = await service.listTrackedSeries({ sourceId, limit: 3 });
+
+      expect(page.data).toHaveLength(3);
+      expect(page.nextCursor).toBeNull();
+    });
+
+    it('pages through the series with the cursor, without gaps or duplicates', async () => {
+      const first = await service.listTrackedSeries({ sourceId, limit: 2 });
+      expect(first.data.map((s) => s.manhwaId)).toEqual(ids.slice(0, 2));
+      expect(first.nextCursor).toBe(ids[1]);
+
+      const second = await service.listTrackedSeries({ sourceId, limit: 2, cursor: first.nextCursor ?? undefined });
+      expect(second.data.map((s) => s.manhwaId)).toEqual(ids.slice(2));
+      expect(second.nextCursor).toBeNull();
     });
   });
 });
