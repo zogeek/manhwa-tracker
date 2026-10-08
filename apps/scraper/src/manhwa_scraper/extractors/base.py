@@ -48,6 +48,15 @@ class SourceExtractor(ABC):
         host = (urlsplit(url).hostname or "").removeprefix("www.")
         return host == (urlsplit(cls.base_url).hostname or "").removeprefix("www.")
 
+    @classmethod
+    def series_url(cls, url: str) -> str | None:
+        """URL canonique de la fiche si `url` en désigne une (ou l'un de ses chapitres), sinon `None`.
+
+        Sert à trier les résultats d'un moteur de recherche. Par défaut aucune URL n'est reconnue : la source
+        n'est alors pas « cherchable », il faut lui donner l'URL de la fiche à la main.
+        """
+        return None
+
     # ---- Déroulé (template method) ----
 
     async def discover(self) -> AsyncIterator[str]:

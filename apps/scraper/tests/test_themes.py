@@ -102,3 +102,31 @@ class TestMangaThemesia:
 
     def test_catalog_url(self) -> None:
         assert DemoThemesia(FakeFetcher()).catalog_page_url(2) == "https://scan.test/manga/?page=2&order=update"
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("https://scan.test/manga/solo/", "https://scan.test/manga/solo/"),
+        ("https://www.scan.test/manga/solo", "https://scan.test/manga/solo/"),
+        ("https://scan.test/manga/solo/chapitre-12/?style=list", "https://scan.test/manga/solo/"),
+        ("https://scan.test/manga/", None),
+        ("https://scan.test/manga/page/2/", None),
+        ("https://scan.test/genre/action/", None),
+        ("https://ailleurs.test/manga/solo/", None),
+    ],
+)
+def test_madara_recognises_series_urls(url: str, expected: str | None) -> None:
+    assert DemoMadara.series_url(url) == expected
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("https://scan.test/manga/omniscient/", "https://scan.test/manga/omniscient/"),
+        ("https://scan.test/omniscient-chapitre-550/", None),
+        ("https://scan.test/manga/", None),
+    ],
+)
+def test_mangathemesia_recognises_series_urls(url: str, expected: str | None) -> None:
+    assert DemoThemesia.series_url(url) == expected

@@ -8,6 +8,7 @@ import logging
 from abc import ABC
 from dataclasses import dataclass
 from typing import ClassVar
+from urllib.parse import urlsplit
 
 from selectolax.lexbor import LexborHTMLParser, LexborNode
 
@@ -55,6 +56,16 @@ class MadaraExtractor(SourceExtractor, ABC):
 
     Beaucoup de sites Madara interdisent `/*?m_orderby=` dans leur `robots.txt` : vérifier avant de l'activer.
     """
+
+    @classmethod
+    def series_url(cls, url: str) -> str | None:
+        """`/<series_path>/<slug>/…` → `/<series_path>/<slug>/` (un lien de chapitre ramène à sa fiche)."""
+        if not cls.handles(url):
+            return None
+        segments = [segment for segment in urlsplit(url).path.split("/") if segment]
+        if len(segments) < 2 or segments[0] != cls.series_path or segments[1] == "page":
+            return None
+        return f"{cls.base_url}{cls.series_path}/{segments[1]}/"
 
     def catalog_page_url(self, page: int) -> str:
         pagination = "" if page == 1 else f"page/{page}/"

@@ -7,6 +7,7 @@ import logging
 from abc import ABC
 from dataclasses import dataclass
 from typing import ClassVar
+from urllib.parse import urlsplit
 
 from selectolax.lexbor import LexborHTMLParser
 
@@ -34,6 +35,16 @@ class MangaThemesiaSelectors:
 class MangaThemesiaExtractor(SourceExtractor, ABC):
     selectors: ClassVar[MangaThemesiaSelectors] = MangaThemesiaSelectors()
     series_path: ClassVar[str] = "manga"
+
+    @classmethod
+    def series_url(cls, url: str) -> str | None:
+        """Seulement `/<series_path>/<slug>/` : les chapitres (`/<slug>-chapitre-12/`) ne mènent pas à la fiche."""
+        if not cls.handles(url):
+            return None
+        segments = [segment for segment in urlsplit(url).path.split("/") if segment]
+        if len(segments) != 2 or segments[0] != cls.series_path:
+            return None
+        return f"{cls.base_url}{cls.series_path}/{segments[1]}/"
 
     def catalog_page_url(self, page: int) -> str:
         return f"{self.base_url}{self.series_path}/?page={page}&order=update"
