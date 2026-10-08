@@ -38,6 +38,20 @@ tiers avec `site:scan-manga.com "Le Royaume"` : le site cible ne reçoit aucune 
 que l'extracteur reconnaît comme une fiche. Une recherche par œuvre suffit : l'URL est ensuite stockée côté API et
 partagée par tous les utilisateurs.
 
+Moteur : une instance **SearXNG auto-hébergée** (`SEARXNG_URL`), sans compte chez un tiers. L'API Brave Search
+reste codée en repli, inactive tant que `SEARXNG_URL` est défini (et sans `BRAVE_SEARCH_API_KEY`). Instance locale :
+
+```yaml
+# docker-compose.yml — puis, dans ./searxng/settings.yml : `use_default_settings: true`,
+# `server.secret_key: <openssl rand -hex 32>` et `search.formats: [html, json]` (sinon l'API JSON répond 403).
+services:
+  searxng:
+    image: searxng/searxng:latest
+    ports: ["127.0.0.1:8080:8080"]
+    volumes: ["./searxng:/etc/searxng"]
+    restart: unless-stopped
+```
+
 ```sh
 uv run manhwa-scraper search scan-manga "Le Royaume"
 uv run manhwa-scraper track --source-id <uuid> "$(uv run manhwa-scraper search scan-manga 'Le Royaume')"
@@ -48,7 +62,7 @@ uv run manhwa-scraper track --source-id <uuid> "$(uv run manhwa-scraper search s
 | `dev` | `manhwa-scraper` : liste les sources (`sources`) ; `run <slug>` lance un scraping ; `track <url>…` scrape des fiches précises ; `search <slug> "<titre>"` trouve une fiche |
 | `lint` / `format` | Ruff (lint + formatage) |
 | `typecheck` | mypy `--strict` (plugin Pydantic) |
-| `test` | pytest — aucun réseau, aucun navigateur (fakes + fixtures HTML synthétiques ; Brave simulé par `httpx.MockTransport`) |
+| `test` | pytest — aucun réseau, aucun navigateur (fakes + fixtures HTML synthétiques ; SearXNG et Brave simulés par `httpx.MockTransport`) |
 | `contract:generate` | Régénère `contract.py` depuis le JSON Schema de l'API (datamodel-codegen) |
 
 ## Contrat avec l'API : source unique de vérité
@@ -115,8 +129,9 @@ Même règle pour les services tiers. Recherche par « dorking » (`site:scan-ma
 `lite.duckduckgo.com` autorise tout, mais une requête automatisée honnête (User-Agent du worker, sans
 déguisement) reçoit un HTTP 202 contenant un CAPTCHA (« Unfortunately, bots use DuckDuckGo too »). C'est un refus
 ciblé des clients automatisés : le franchir avec curl_cffi / Camoufox serait exactement ce qu'on s'interdit. Pistes
-conformes retenues : l'API officielle de Brave Search (clé, quota, automatisation autorisée) pour `search`, et
-l'URL collée à la main pour `track`.
+conformes retenues : une instance SearXNG auto-hébergée pour `search` (une requête par œuvre, jamais en boucle ;
+l'instance suspend d'elle-même un moteur qui lui oppose un CAPTCHA, sans le contourner), et l'URL collée à la main
+pour `track`. L'API Brave Search reste disponible en repli mais exige un compte nominatif chez un tiers.
 
 Exemple de correction : mangas-origines.fr interdit `/*?m_orderby=` ; la découverte demande donc `/oeuvre/`
 sans paramètre (tri par défaut = dernières sorties) au lieu de `?m_orderby=latest`.
@@ -147,7 +162,7 @@ src/manhwa_scraper/
 ├── models.py              réponses de l'API + sérialisation camelCase
 ├── ingest_client.py       client HTTP de l'API (clé de service, ré-essais, idempotence)
 ├── pipeline.py            ScrapeRunner : cibles (catalogue, Top ou URLs) → fiches → lots, scrape_runs + source_health
-├── search.py              dorking : SearchEngine (protocole), BraveSearchEngine, SeriesFinder
+├── search.py              dorking : SearchEngine (protocole), SearxngSearchEngine, BraveSearchEngine (repli), SeriesFinder
 ├── fetching/
 │   ├── base.py            PageFetcher (protocole), FetchResult, détection des challenges
 │   ├── http.py            CurlCffiFetcher   (étage rapide)
