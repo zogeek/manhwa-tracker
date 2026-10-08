@@ -24,6 +24,19 @@ class Settings(BaseSettings):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 
 
+class SearchSettings(BaseSettings):
+    """Variables de `search` uniquement : chercher une URL ne demande ni l'API Hono ni sa clé."""
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", frozen=True)
+
+    # Clé de l'API Brave Search (offre gratuite : https://api-dashboard.search.brave.com).
+    brave_search_api_key: Annotated[SecretStr, Field(min_length=1)]
+
+
 def load_settings() -> Settings:
     """Lève une `ValidationError` explicite si une variable manque ou est invalide."""
     return Settings()
+
+
+def load_search_settings() -> SearchSettings:
+    return SearchSettings()
