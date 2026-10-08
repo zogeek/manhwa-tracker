@@ -1,11 +1,14 @@
 """Orchestration d'un run : catalogue → fiches → lots vers l'API, avec télémétrie (`scrape_runs`, `source_health`).
 
+Deux modes : découverte (le catalogue de la source fournit les fiches) ou séries suivies (`urls` explicites,
+commande `track`) — même déroulé ensuite.
+
 Une fiche qui échoue n'arrête pas le run (il finit `partial`) ; un blocage anti-bot, si : insister
 ne ferait qu'aggraver le bannissement, on s'arrête et on signale la source `blocked`.
 """
 
 import logging
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from uuid import UUID
@@ -48,6 +51,7 @@ class ScrapeRunner:
         worker_version: str,
         batch_size: int = 20,
         max_series: int | None = None,
+        urls: Sequence[str] | None = None,
         now: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self._extractor = extractor
@@ -56,6 +60,8 @@ class ScrapeRunner:
         self._worker_version = worker_version
         self._batch_size = batch_size
         self._max_series = max_series
+        self._urls = urls
+        """`None` = découverte via le catalogue ; sinon les fiches suivies, telles quelles."""
         self._now = now
 
     async def run(self) -> RunReport:
@@ -79,7 +85,7 @@ class ScrapeRunner:
 
     async def _scrape(self, run_id: UUID, stats: RunStats) -> None:
         pending: list[IngestManhwa] = []
-        async for url in self._extractor.discover():
+        async for url in self._series_urls():
             if self._max_series is not None and stats.series_found >= self._max_series:
                 break
             stats.series_found += 1
@@ -98,6 +104,14 @@ class ScrapeRunner:
                 await self._flush(run_id, pending, stats)
         if pending:
             await self._flush(run_id, pending, stats)
+
+    async def _series_urls(self) -> AsyncIterator[str]:
+        if self._urls is None:
+            async for url in self._extractor.discover():
+                yield url
+            return
+        for url in dict.fromkeys(self._urls):  # sans doublon, ordre conservé
+            yield url
 
     async def _flush(self, run_id: UUID, pending: list[IngestManhwa], stats: RunStats) -> None:
         batch = IngestBatch(source_id=self._source_id, scrape_run_id=run_id, manhwas=pending)

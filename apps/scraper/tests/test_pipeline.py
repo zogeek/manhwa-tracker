@@ -147,3 +147,15 @@ async def test_an_unexpected_error_still_closes_the_run(api: FakeIngestApi, inge
         await runner(fetcher, ingest).run()
 
     assert api.bodies("PATCH", f"/api/ingest/runs/{api.run_id}")[0]["status"] == "failed"
+
+
+async def test_tracked_series_skip_the_catalog(api: FakeIngestApi, fetcher: FakeFetcher, ingest: IngestClient) -> None:
+    tracked = ScrapeRunner(DemoMadara(fetcher), ingest, source_id=SOURCE_ID, worker_version="test", urls=[NECRO, NECRO])
+
+    report = await tracked.run()
+
+    assert report.outcome == RunOutcome.succeeded
+    assert [call.url for call in fetcher.calls] == [NECRO]  # ni catalogue, ni doublon
+    assert [m["title"] for m in api.bodies("POST", "/api/ingest/batches")[0]["manhwas"]] == [
+        "Le Nécromancien Catastrophique"
+    ]
