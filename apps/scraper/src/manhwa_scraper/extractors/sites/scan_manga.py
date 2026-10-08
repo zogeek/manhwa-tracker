@@ -31,7 +31,9 @@ Relevé du 2026-09-27 :
   (non lisibles) et sont ignorés. Pas de date de sortie sur la fiche.
 """
 
+import re
 from typing import ClassVar
+from urllib.parse import urlsplit
 
 from selectolax.lexbor import LexborHTMLParser
 
@@ -41,6 +43,8 @@ from ..parsing import absolute_url, clean_text, parse_chapter_number, parse_chap
 
 # Catégories du fil d'Ariane hors du périmètre du tracker (le contrat ne connaît que manga/manhwa/manhua/webtoon).
 UNSUPPORTED_CATEGORIES = frozenset({"novel"})
+# Fiche : `/1805/Titre.html` (forme courte, redirigée) ou `/1805-54398/Titre.html`.
+_SERIES_PATH = re.compile(r"/\d+(?:-\d+)?/[^/]+\.html")
 # Seul classement de l'accueil dans le périmètre (manga/manhwa/manhua/webtoon non licenciés).
 TOP_HEADING = "top découvertes bd"
 
@@ -52,6 +56,13 @@ class ScanMangaExtractor(SourceExtractor):
     ready: ClassVar[bool] = True
     max_catalog_pages: ClassVar[int] = 1  # seul l'accueil est rendu côté serveur (voir la docstring du module)
     top_page_url: ClassVar[str | None] = base_url  # le Top est dans la colonne de droite de l'accueil
+
+    @classmethod
+    def series_url(cls, url: str) -> str | None:
+        path = urlsplit(url).path
+        if not cls.handles(url) or _SERIES_PATH.fullmatch(path) is None:
+            return None
+        return f"{cls.base_url.rstrip('/')}{path}"
 
     def catalog_page_url(self, page: int) -> str:
         return self.base_url

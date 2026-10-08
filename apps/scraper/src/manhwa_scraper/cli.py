@@ -3,6 +3,7 @@
 manhwa-scraper                         # liste les sources connues (défaut)
 manhwa-scraper run <slug> --source-id <uuid> [--discovery latest|top] [--max-series N]
 manhwa-scraper track --source-id <uuid> [<url> ...] [--urls-file fichier.txt]
+manhwa-scraper search <slug> "<titre>"   # URL de la fiche, par dorking sur un moteur de recherche
 """
 
 import argparse
@@ -10,7 +11,7 @@ import asyncio
 import logging
 import sys
 from collections.abc import AsyncIterator, Callable, Sequence
-from contextlib import AsyncExitStack
+from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 from typing import Literal
 from uuid import UUID
@@ -18,7 +19,7 @@ from uuid import UUID
 from pydantic import ValidationError
 
 from . import __version__
-from .config import Settings, load_settings
+from .config import SearchSettings, Settings, load_search_settings, load_settings
 from .contract import RunOutcome
 from .extractors import SourceExtractor, UnknownSourceError, UnsupportedDiscoveryError
 from .extractors.sites import default_registry
@@ -27,6 +28,15 @@ from .fetching.browser import CamoufoxFetcher
 from .fetching.http import CurlCffiFetcher
 from .ingest_client import IngestClient, create_http_client
 from .pipeline import RunReport, ScrapeRunner, explicit_urls
+from .search import (
+    BraveSearchEngine,
+    SearchEngine,
+    SearchError,
+    SearxngSearchEngine,
+    SeriesFinder,
+    create_brave_client,
+    create_searxng_client,
+)
 
 Discovery = Literal["latest", "top"]
 Targets = Callable[[SourceExtractor], AsyncIterator[str]]
@@ -55,6 +65,9 @@ def _parser() -> argparse.ArgumentParser:
     )
     track.add_argument("--source-id", type=UUID, required=True, help="UUID de la source dans l'API (table `sources`)")
     track.add_argument("--max-series", type=int, default=None, help="limite le nombre de fiches (essais)")
+    search = commands.add_parser("search", help="trouve l'URL de la fiche d'une œuvre (dorking sur un moteur tiers)")
+    search.add_argument("slug", help="slug de la source (voir `sources`)")
+    search.add_argument("title", help="titre de l'œuvre, tel qu'affiché sur le site")
     return parser
 
 
@@ -79,7 +92,8 @@ def _resolve(args: argparse.Namespace) -> tuple[type[SourceExtractor], Targets]:
     if args.command == "track":
         urls: list[str] = [*args.urls, *(_read_urls_file(args.urls_file) if args.urls_file else [])]
         extractor_cls = registry.for_urls(urls)
-        targets = _tracked(urls)
+        # Un lien de chapitre ramène à sa fiche ; une URL que l'extracteur ne sait pas lire est gardée telle quelle.
+        targets = _tracked([extractor_cls.series_url(url) or url for url in urls])
     else:
         extractor_cls = registry.get(args.slug)
         if args.discovery == "top" and extractor_cls.top_page_url is None:
@@ -88,6 +102,38 @@ def _resolve(args: argparse.Namespace) -> tuple[type[SourceExtractor], Targets]:
     if not extractor_cls.ready:
         raise UnknownSourceError(f"La source « {extractor_cls.slug} » n'est encore qu'un squelette (ready = False)")
     return extractor_cls, targets
+
+
+@asynccontextmanager
+async def _search_engine(settings: SearchSettings) -> AsyncIterator[SearchEngine]:
+    """SearXNG dès que `SEARXNG_URL` est défini ; Brave seulement en repli explicite (clé sans SearXNG)."""
+    if settings.searxng_url is not None:
+        async with create_searxng_client(str(settings.searxng_url)) as http:
+            yield SearxngSearchEngine(http)
+    elif settings.brave_search_api_key is not None:
+        async with create_brave_client(settings.brave_search_api_key.get_secret_value()) as http:
+            yield BraveSearchEngine(http)
+    else:
+        raise SearchError("Aucun moteur de recherche configuré : définir SEARXNG_URL (ex. http://localhost:8080)")
+
+
+async def _search(settings: SearchSettings, extractor_cls: type[SourceExtractor], title: str) -> str | None:
+    async with _search_engine(settings) as engine:
+        return await SeriesFinder(engine).find(extractor_cls, title)
+
+
+def _main_search(slug: str, title: str) -> int:
+    try:
+        extractor_cls = default_registry().get(slug)
+        url = asyncio.run(_search(load_search_settings(), extractor_cls, title))
+    except (UnknownSourceError, ValidationError, ValueError, SearchError) as error:
+        print(error, file=sys.stderr)
+        return 2
+    if url is None:
+        print(f"Aucune fiche {slug} trouvée pour « {title} »", file=sys.stderr)
+        return 1
+    print(url)
+    return 0
 
 
 def _print_sources() -> None:
@@ -132,6 +178,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command in (None, "sources"):
         _print_sources()
         return 0
+    if args.command == "search":
+        return _main_search(args.slug, args.title)
 
     try:
         extractor_cls, targets = _resolve(args)

@@ -24,6 +24,21 @@ class Settings(BaseSettings):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 
 
+class SearchSettings(BaseSettings):
+    """Variables de `search` uniquement (non préfixées) : chercher une URL ne demande ni l'API Hono ni sa clé."""
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", frozen=True)
+
+    # Instance SearXNG auto-hébergée (ex. http://localhost:8080) : moteur prioritaire dès qu'elle est définie.
+    searxng_url: HttpUrl | None = None
+    # Repli inactif par défaut : clé de l'API Brave Search (compte requis), utilisée seulement sans SEARXNG_URL.
+    brave_search_api_key: Annotated[SecretStr, Field(min_length=1)] | None = None
+
+
 def load_settings() -> Settings:
     """Lève une `ValidationError` explicite si une variable manque ou est invalide."""
     return Settings()
+
+
+def load_search_settings() -> SearchSettings:
+    return SearchSettings()

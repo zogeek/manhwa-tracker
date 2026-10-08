@@ -71,6 +71,23 @@ async def test_novels_are_out_of_scope() -> None:
         await ScanMangaExtractor(fetcher).scrape_series(SERIES)
 
 
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        (
+            "https://scan-manga.com/1805-54398/Le-Royaume.html?x=1",
+            "https://www.scan-manga.com/1805-54398/Le-Royaume.html",
+        ),
+        (SERIES, SERIES),
+        ("https://www.scan-manga.com/", None),
+        ("https://www.scan-manga.com/lecture-en-ligne/Le-Royaume-Chapitre-12-FR_123.html", None),
+        ("https://ailleurs.test/1805/Le-Royaume.html", None),
+    ],
+)
+def test_recognises_series_urls(url: str, expected: str | None) -> None:
+    assert ScanMangaExtractor.series_url(url) == expected
+
+
 def test_reads_the_top_ranking_of_the_right_column_only() -> None:
     links = ScanMangaExtractor(FakeFetcher()).parse_top(LexborHTMLParser(fixture("scan_manga_home.html")), HOME)
 
