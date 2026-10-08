@@ -13,27 +13,39 @@ pnpm --filter scraper dev       # liste les sources et leur état
 uv run manhwa-scraper run <slug> --source-id <uuid-de-la-source> [--max-series 5]
 ```
 
-Deux modes de scraping, même déroulé (fiches → lots → `/api/ingest`) :
+### Trois façons de choisir les fiches à scraper
+
+Le scraper ne cherche pas à inventorier les catalogues : la découverte et les métadonnées de référence viennent
+d'AniList. Il sert au « dernier kilomètre » francophone : savoir **où** lire une œuvre et quand sort un chapitre.
+
+| Flux | Commande | Requêtes | Usage |
+|---|---|---|---|
+| Dernières sorties | `run <slug> --source-id …` | 1 page de listing + 1 par fiche | suivi des nouveautés, lancé souvent |
+| Top du site | `run <slug> --source-id … --discovery top` | 1 page (le Top) + 1 par fiche | suggestions : ce que lit la communauté |
+| URL directe | `track --source-id … <url> [<url>…]` ou `--urls-file suivies.txt` | 1 par fiche, aucun catalogue | séries suivies par les utilisateurs |
+
+En mode `track`, la source est déduite du domaine de chaque URL (toutes doivent appartenir à la même source, car un
+run est rattaché à une ligne de `sources`). Le fichier contient une URL par ligne ; lignes vides et `#` ignorées.
+Seules les sources qui exposent un Top côté serveur acceptent `--discovery top` (aujourd'hui : scan-manga).
+
+En mode `track`, un lien de chapitre est ramené à sa fiche (`SourceExtractor.series_url`).
+
+**Recherche sur le site : non disponible.** Aucune source prête ne l'autorise : scan-manga la sert uniquement aux
+navigateurs (refus ciblé, voir « Ligne rouge ») et le `robots.txt` de mangas-origines interdit `/?s=`.
+
+**Recherche par dorking : `search`.** Pour trouver l'URL d'une fiche à partir de son titre, on interroge un moteur
+tiers avec `site:scan-manga.com "Le Royaume"` : le site cible ne reçoit aucune requête. On garde le premier résultat
+que l'extracteur reconnaît comme une fiche. Une recherche par œuvre suffit : l'URL est ensuite stockée côté API et
+partagée par tous les utilisateurs.
 
 ```sh
-# Découverte : les dernières sorties du catalogue de la source.
-uv run manhwa-scraper run scan-manga --source-id <uuid>
-# Séries suivies : uniquement ces fiches (un lien de chapitre est ramené à sa fiche).
-uv run manhwa-scraper track https://www.scan-manga.com/1805-54398/Le-Royaume.html --source-id <uuid>
-# Trouver l'URL d'une fiche par son titre (dorking via l'API Brave Search, BRAVE_SEARCH_API_KEY requis).
 uv run manhwa-scraper search scan-manga "Le Royaume"
-# Les deux enchaînés :
-uv run manhwa-scraper track "$(uv run manhwa-scraper search scan-manga 'Le Royaume')" --source-id <uuid>
+uv run manhwa-scraper track --source-id <uuid> "$(uv run manhwa-scraper search scan-manga 'Le Royaume')"
 ```
-
-`search` pose `site:scan-manga.com "Le Royaume"` à Brave et garde le premier résultat que l'extracteur reconnaît
-comme une fiche (`SourceExtractor.series_url`). Le site cible ne reçoit aucune requête. Une recherche par œuvre
-suffit (l'URL est ensuite stockée côté API et partagée par tous les utilisateurs) : l'offre gratuite de Brave
-(~2 000 requêtes/mois) couvre l'usage. Au-delà, `SearchEngine` est un protocole : un SearXNG auto-hébergé s'y branche.
 
 | Script | Rôle |
 |---|---|
-| `dev` | `manhwa-scraper` : liste les sources (`sources`) ; `run <slug>` (découverte), `track <url>…` (séries suivies), `search <slug> "<titre>"` |
+| `dev` | `manhwa-scraper` : liste les sources (`sources`) ; `run <slug>` lance un scraping ; `track <url>…` scrape des fiches précises ; `search <slug> "<titre>"` trouve une fiche |
 | `lint` / `format` | Ruff (lint + formatage) |
 | `typecheck` | mypy `--strict` (plugin Pydantic) |
 | `test` | pytest — aucun réseau, aucun navigateur (fakes + fixtures HTML synthétiques ; Brave simulé par `httpx.MockTransport`) |
@@ -82,7 +94,7 @@ Ce worker alimente un **tracker personnel** : il suit les sorties de chapitres, 
 
 **Politesse**
 - Au plus une requête toutes les 1,5 s par site (`SCRAPER_REQUEST_INTERVAL_S`), une seule requête par fiche quand
-  c'est possible, découverte limitée aux dernières sorties plutôt qu'au catalogue entier.
+  c'est possible, découverte limitée aux dernières sorties, au Top ou aux URLs suivies plutôt qu'au catalogue entier.
 - Un blocage anti-bot arrête le run immédiatement (source marquée `blocked`) : on n'insiste pas.
 
 **Ligne rouge : on ne contourne jamais un refus ciblé**
@@ -94,6 +106,8 @@ scan-manga.com :
 - le sitemap, refusé (403) hors moteurs de recherche ;
 - `scan.data.json` (catalogue complet de ~16 000 œuvres), servi aux navigateurs mais **vide** pour un client HTTP
   aux en-têtes identiques, derrière un code JavaScript obfusqué ;
+- la recherche : `liste_series.html?q=…` est remplie depuis ce même `scan.data.json`, et les suggestions
+  `qsearch.json` (pourtant publiées dans `osd.xml`) répondent elles aussi 200 au corps **vide** à un client HTTP ;
 - plus généralement : pas de désobfuscation de code, pas de jeton rejoué, pas de compte ni de paywall contourné.
 
 Même règle pour les services tiers. Recherche par « dorking » (`site:scan-manga.com "Titre"`) sur DuckDuckGo,
@@ -107,7 +121,7 @@ l'URL collée à la main pour `track`.
 Exemple de correction : mangas-origines.fr interdit `/*?m_orderby=` ; la découverte demande donc `/oeuvre/`
 sans paramètre (tri par défaut = dernières sorties) au lieu de `?m_orderby=latest`.
 
-Si une source ne peut pas être suivie dans ces limites, on la suit partiellement (dernières sorties) ou pas du tout,
+Si une source ne peut pas être suivie dans ces limites, on la suit partiellement (dernières sorties, Top, URLs suivies) ou pas du tout,
 et on peut toujours demander l'autorisation à ses administrateurs.
 
 ## Stack
@@ -132,7 +146,7 @@ src/manhwa_scraper/
 ├── contract_base.py       politique de validation du worker (base des modèles générés)
 ├── models.py              réponses de l'API + sérialisation camelCase
 ├── ingest_client.py       client HTTP de l'API (clé de service, ré-essais, idempotence)
-├── pipeline.py            ScrapeRunner : catalogue ou séries suivies → fiches → lots, scrape_runs + source_health
+├── pipeline.py            ScrapeRunner : cibles (catalogue, Top ou URLs) → fiches → lots, scrape_runs + source_health
 ├── search.py              dorking : SearchEngine (protocole), BraveSearchEngine, SeriesFinder
 ├── fetching/
 │   ├── base.py            PageFetcher (protocole), FetchResult, détection des challenges
@@ -159,6 +173,6 @@ src/manhwa_scraper/
 | Source | Moteur | Protection | Étage suffisant | État |
 |---|---|---|---|---|
 | mangas-origines.fr | Madara (thème enfant) | Cloudflare | HTTP | ✅ **prêt** (1 requête par fiche, chapitres compris ; essai réel : 3 œuvres, 417 chapitres ingérés) |
-| scan-manga.com | PHP propriétaire | Cloudflare (bot management) | HTTP (curl_cffi) | ✅ **prêt** : découverte par l'accueil (~100 dernières sorties, le catalogue complet est rendu en JS), romans écartés, tomes licenciés ignorés |
+| scan-manga.com | PHP propriétaire | Cloudflare (bot management) | HTTP (curl_cffi) | ✅ **prêt** : découverte par l'accueil (~100 dernières sorties, ou Top découvertes BD ~85 œuvres ; le catalogue complet et la recherche sont réservés aux navigateurs), romans écartés, tomes licenciés ignorés |
 | rimuscan.fr | Next.js | Cloudflare (sans challenge) | HTTP | squelette |
 | astral-manga.fr | Next.js | Cloudflare (challenge JS) | Navigateur (Camoufox) | squelette |

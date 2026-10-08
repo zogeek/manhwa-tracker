@@ -17,6 +17,14 @@ Relevé du 2026-09-27 :
   reçoit un 200 au corps VIDE. Seule différence : l'exécution du JavaScript de détection de bots de Cloudflare.
   Le site réserve donc sciemment cette ressource aux navigateurs (code de la page obfusqué, robots.txt hostile
   aux robots d'IA) : c'est un refus ciblé de l'extraction en masse, on ne le contourne pas (cf. README, « Éthique »).
+- Top (relevé du 2026-09-29) : la colonne de droite de l'accueil (`#right_fixed`) porte, rendu côté serveur, le
+  « Top découvertes BD » (~85 œuvres classées) ; le pied de page n'en reprend que les premières. Les autres
+  classements (novels, licenciées, ventes France) sont hors périmètre : romans, ou tomes sans chapitre lisible.
+- Recherche, volontairement NON implémentée (relevé du 2026-09-29) : il n'existe pas de formulaire HTML. La
+  recherche publiée (`SearchAction`, OpenSearch) mène à `liste_series.html?q=…`, coquille remplie en JavaScript
+  depuis `scan.data.json` (voir plus haut) ; les suggestions `qsearch.json?term=…` publiées dans `osd.xml`
+  répondent elles aussi 200 au corps VIDE à un client HTTP, gabarit exact compris. Même refus ciblé : on ne le
+  contourne pas. Pour suivre une œuvre absente des dernières sorties et du Top, on passe son URL (`track`).
 - Fiche : type dans le fil d'Ariane (Manga / Manhwa / Novel…), fiche technique en deux listes parallèles
   (libellés / valeurs), synopsis et couverture en microdonnées schema.org.
 - Chapitres : `li.chapitre` groupés par volume ; les chapitres de tomes parus en France n'ont pas de lien
@@ -30,13 +38,15 @@ from urllib.parse import urlsplit
 from selectolax.lexbor import LexborHTMLParser
 
 from ...contract import IngestChapter, IngestManhwa
-from ..base import ExtractionError, SourceExtractor, UnsupportedSeriesError
+from ..base import ExtractionError, SeriesLink, SourceExtractor, UnsupportedSeriesError
 from ..parsing import absolute_url, clean_text, parse_chapter_number, parse_chapter_title, parse_status, parse_type
 
 # Catégories du fil d'Ariane hors du périmètre du tracker (le contrat ne connaît que manga/manhwa/manhua/webtoon).
 UNSUPPORTED_CATEGORIES = frozenset({"novel"})
 # Fiche : `/1805/Titre.html` (forme courte, redirigée) ou `/1805-54398/Titre.html`.
 _SERIES_PATH = re.compile(r"/\d+(?:-\d+)?/[^/]+\.html")
+# Seul classement de l'accueil dans le périmètre (manga/manhwa/manhua/webtoon non licenciés).
+TOP_HEADING = "top découvertes bd"
 
 
 class ScanMangaExtractor(SourceExtractor):
@@ -45,6 +55,7 @@ class ScanMangaExtractor(SourceExtractor):
     base_url: ClassVar[str] = "https://www.scan-manga.com/"
     ready: ClassVar[bool] = True
     max_catalog_pages: ClassVar[int] = 1  # seul l'accueil est rendu côté serveur (voir la docstring du module)
+    top_page_url: ClassVar[str | None] = base_url  # le Top est dans la colonne de droite de l'accueil
 
     @classmethod
     def series_url(cls, url: str) -> str | None:
@@ -63,6 +74,20 @@ class ScanMangaExtractor(SourceExtractor):
             if href:
                 urls[absolute_url(page_url, href)] = None
         return list(urls)
+
+    def parse_top(self, document: LexborHTMLParser, page_url: str) -> list[SeriesLink]:
+        for block in document.css("#right_fixed .nano-content"):
+            heading = clean_text(block.css_first("h1"))
+            if heading is None or heading.lower() != TOP_HEADING:
+                continue
+            links: list[SeriesLink] = []
+            for link in block.css(".right_manga_top a.right_manga_top"):
+                href = link.attributes.get("href")
+                title = clean_text(link)
+                if href and title:
+                    links.append(SeriesLink(title=title, url=absolute_url(page_url, href)))
+            return links
+        raise ExtractionError(f"Bloc « Top découvertes BD » introuvable sur {page_url}")
 
     def parse_series(self, document: LexborHTMLParser, series_url: str) -> IngestManhwa:
         title = clean_text(document.css_first('h2[itemprop~="headline"]'))
