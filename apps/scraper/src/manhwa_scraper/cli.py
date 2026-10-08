@@ -11,7 +11,7 @@ import asyncio
 import logging
 import sys
 from collections.abc import AsyncIterator, Callable, Sequence
-from contextlib import AsyncExitStack
+from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 from typing import Literal
 from uuid import UUID
@@ -19,7 +19,7 @@ from uuid import UUID
 from pydantic import ValidationError
 
 from . import __version__
-from .config import Settings, load_search_settings, load_settings
+from .config import SearchSettings, Settings, load_search_settings, load_settings
 from .contract import RunOutcome
 from .extractors import SourceExtractor, UnknownSourceError, UnsupportedDiscoveryError
 from .extractors.sites import default_registry
@@ -28,7 +28,15 @@ from .fetching.browser import CamoufoxFetcher
 from .fetching.http import CurlCffiFetcher
 from .ingest_client import IngestClient, create_http_client
 from .pipeline import RunReport, ScrapeRunner, explicit_urls
-from .search import BraveSearchEngine, SearchError, SeriesFinder, create_brave_client
+from .search import (
+    BraveSearchEngine,
+    SearchEngine,
+    SearchError,
+    SearxngSearchEngine,
+    SeriesFinder,
+    create_brave_client,
+    create_searxng_client,
+)
 
 Discovery = Literal["latest", "top"]
 Targets = Callable[[SourceExtractor], AsyncIterator[str]]
@@ -96,16 +104,28 @@ def _resolve(args: argparse.Namespace) -> tuple[type[SourceExtractor], Targets]:
     return extractor_cls, targets
 
 
-async def _search(api_key: str, extractor_cls: type[SourceExtractor], title: str) -> str | None:
-    async with create_brave_client(api_key) as http:
-        return await SeriesFinder(BraveSearchEngine(http)).find(extractor_cls, title)
+@asynccontextmanager
+async def _search_engine(settings: SearchSettings) -> AsyncIterator[SearchEngine]:
+    """SearXNG dès que `SEARXNG_URL` est défini ; Brave seulement en repli explicite (clé sans SearXNG)."""
+    if settings.searxng_url is not None:
+        async with create_searxng_client(str(settings.searxng_url)) as http:
+            yield SearxngSearchEngine(http)
+    elif settings.brave_search_api_key is not None:
+        async with create_brave_client(settings.brave_search_api_key.get_secret_value()) as http:
+            yield BraveSearchEngine(http)
+    else:
+        raise SearchError("Aucun moteur de recherche configuré : définir SEARXNG_URL (ex. http://localhost:8080)")
+
+
+async def _search(settings: SearchSettings, extractor_cls: type[SourceExtractor], title: str) -> str | None:
+    async with _search_engine(settings) as engine:
+        return await SeriesFinder(engine).find(extractor_cls, title)
 
 
 def _main_search(slug: str, title: str) -> int:
     try:
         extractor_cls = default_registry().get(slug)
-        api_key = load_search_settings().brave_search_api_key.get_secret_value()
-        url = asyncio.run(_search(api_key, extractor_cls, title))
+        url = asyncio.run(_search(load_search_settings(), extractor_cls, title))
     except (UnknownSourceError, ValidationError, ValueError, SearchError) as error:
         print(error, file=sys.stderr)
         return 2

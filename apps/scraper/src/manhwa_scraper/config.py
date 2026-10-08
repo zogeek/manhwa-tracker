@@ -25,12 +25,14 @@ class Settings(BaseSettings):
 
 
 class SearchSettings(BaseSettings):
-    """Variables de `search` uniquement : chercher une URL ne demande ni l'API Hono ni sa clé."""
+    """Variables de `search` uniquement (non préfixées) : chercher une URL ne demande ni l'API Hono ni sa clé."""
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", frozen=True)
 
-    # Clé de l'API Brave Search (offre gratuite : https://api-dashboard.search.brave.com).
-    brave_search_api_key: Annotated[SecretStr, Field(min_length=1)]
+    # Instance SearXNG auto-hébergée (ex. http://localhost:8080) : moteur prioritaire dès qu'elle est définie.
+    searxng_url: HttpUrl | None = None
+    # Repli inactif par défaut : clé de l'API Brave Search (compte requis), utilisée seulement sans SEARXNG_URL.
+    brave_search_api_key: Annotated[SecretStr, Field(min_length=1)] | None = None
 
 
 def load_settings() -> Settings:
