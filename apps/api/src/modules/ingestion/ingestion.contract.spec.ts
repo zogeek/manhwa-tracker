@@ -25,6 +25,9 @@ describe('ingestion contract (JSON Schema)', () => {
       'RecordHealth',
       'RunOutcome',
       'StartRun',
+      'TrackedSeries',
+      'TrackedSeriesPage',
+      'TrackedSeriesQuery',
     ]);
   });
 

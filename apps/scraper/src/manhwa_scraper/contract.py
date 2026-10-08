@@ -105,6 +105,28 @@ class StartRun(ContractModel):
     worker_version: Annotated[WorkerVersion | None, Field(alias="workerVersion")] = None
 
 
+type LatestChapter = Annotated[float, Field(ge=0.0, le=999999.99, multiple_of=0.01)]
+
+
+class TrackedSeries(ContractModel):
+    manhwa_id: Annotated[UUID, Field(alias="manhwaId")]
+    manhwa_url: Annotated[AnyUrl | None, Field(alias="manhwaUrl")]
+    latest_chapter: Annotated[LatestChapter | None, Field(alias="latestChapter")]
+    last_scraped_at: Annotated[AwareDatetime | None, Field(alias="lastScrapedAt")]
+    title: str
+
+
+class TrackedSeriesPage(ContractModel):
+    data: list[TrackedSeries]
+    next_cursor: Annotated[UUID | None, Field(alias="nextCursor")]
+
+
+class TrackedSeriesQuery(ContractModel):
+    source_id: Annotated[UUID, Field(alias="sourceId")]
+    cursor: UUID | None = None
+    limit: Annotated[int, Field(ge=1, le=500)] = 100
+
+
 class FinishRun(ContractModel):
     status: RunOutcome
     stats: dict[str, StatsAdditionalProperty] | None = None

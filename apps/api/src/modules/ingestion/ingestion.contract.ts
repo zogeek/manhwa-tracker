@@ -4,6 +4,8 @@ import {
   ingestBatchSchema,
   recordHealthSchema,
   startRunSchema,
+  trackedSeriesPageSchema,
+  trackedSeriesQuerySchema,
 } from './ingestion.validator.js';
 
 /**
@@ -13,7 +15,14 @@ import {
  *
  * `io: 'input'` décrit ce que le client ENVOIE (avant les `transform`, ex. date ISO → `Date`).
  */
-const contractSchemas = [startRunSchema, finishRunSchema, recordHealthSchema, ingestBatchSchema];
+const contractSchemas = [
+  startRunSchema,
+  finishRunSchema,
+  recordHealthSchema,
+  ingestBatchSchema,
+  trackedSeriesQuerySchema,
+  trackedSeriesPageSchema,
+];
 
 export const INGESTION_CONTRACT_PATH = 'contracts/ingestion.schema.json';
 

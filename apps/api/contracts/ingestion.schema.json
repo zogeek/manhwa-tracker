@@ -381,6 +381,108 @@
       "required": [
         "sourceId"
       ]
+    },
+    "TrackedSeries": {
+      "type": "object",
+      "properties": {
+        "manhwaId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "manhwaUrl": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uri"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "latestChapter": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 999999.99,
+              "multipleOf": 0.01
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lastScrapedAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "manhwaId",
+        "manhwaUrl",
+        "latestChapter",
+        "lastScrapedAt",
+        "title"
+      ]
+    },
+    "TrackedSeriesPage": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TrackedSeries"
+          }
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "data",
+        "nextCursor"
+      ]
+    },
+    "TrackedSeriesQuery": {
+      "type": "object",
+      "properties": {
+        "sourceId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "cursor": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "limit": {
+          "default": 100,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 500
+        }
+      },
+      "required": [
+        "sourceId"
+      ]
     }
   }
 }
