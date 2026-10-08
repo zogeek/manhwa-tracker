@@ -1,6 +1,8 @@
 """Premier extracteur « prêt » : fiche, chapitres et catalogue sur des fixtures synthétiques reproduisant le thème."""
 
+import re
 from datetime import datetime
+from urllib.parse import urlsplit
 
 import pytest
 from selectolax.lexbor import LexborHTMLParser
@@ -14,8 +16,21 @@ from manhwa_scraper.fetching import FetchError
 from .fakes import FakeFetcher, fixture
 
 SERIES = "https://mangas-origines.fr/oeuvre/lame-d-ombre/"
-CATALOG = "https://mangas-origines.fr/oeuvre/?m_orderby=latest"
-CATALOG_2 = "https://mangas-origines.fr/oeuvre/page/2/?m_orderby=latest"
+CATALOG = "https://mangas-origines.fr/oeuvre/"
+CATALOG_2 = "https://mangas-origines.fr/oeuvre/page/2/"
+# `Disallow` de https://mangas-origines.fr/robots.txt pour `User-Agent: *` (relevé du 2026-10-06).
+ROBOTS_DISALLOW = (
+    "/wp-admin/",
+    "/wp-content/cache/",
+    "/wp-content/uploads/private/",
+    "/cgi-bin/",
+    "/trackback/",
+    "/xmlrpc.php",
+    "/?s=",
+    "/*?s=",
+    "/*?m_orderby=",
+    "/*?replytocom=",
+)
 
 
 def test_is_ready_and_runnable_from_the_cli() -> None:
@@ -72,3 +87,25 @@ async def test_walks_the_catalog_until_wordpress_answers_404() -> None:
 async def test_a_404_on_the_first_catalog_page_is_a_real_error() -> None:
     with pytest.raises(FetchError):
         _ = [url async for url in MangasOriginesExtractor(FakeFetcher()).discover()]
+
+
+def _robots_disallows(url: str) -> bool:
+    """Correspondance RFC 9309 : préfixe du chemin + requête, `*` = n'importe quelle suite, `$` = fin."""
+    parts = urlsplit(url)
+    target = parts.path + (f"?{parts.query}" if parts.query else "")
+    for rule in ROBOTS_DISALLOW:
+        pattern = re.escape(rule).replace(r"\*", ".*").removesuffix(r"\$")
+        if re.match(pattern + ("$" if rule.endswith("$") else ""), target):
+            return True
+    return False
+
+
+def test_robots_rule_matcher_catches_the_former_catalog_url() -> None:
+    assert _robots_disallows("https://mangas-origines.fr/oeuvre/page/2/?m_orderby=latest")
+
+
+@pytest.mark.parametrize("page", [1, 2, 50])
+def test_catalog_urls_respect_robots_txt(page: int) -> None:
+    url = MangasOriginesExtractor(FakeFetcher()).catalog_page_url(page)
+
+    assert not _robots_disallows(url), url

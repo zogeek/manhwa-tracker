@@ -50,10 +50,16 @@ class MadaraSelectors:
 class MadaraExtractor(SourceExtractor, ABC):
     selectors: ClassVar[MadaraSelectors] = MadaraSelectors()
     series_path: ClassVar[str] = "manga"
+    catalog_order: ClassVar[str | None] = "latest"
+    """Tri demandé via `?m_orderby=` ; `None` = tri par défaut du site, sans paramètre.
+
+    Beaucoup de sites Madara interdisent `/*?m_orderby=` dans leur `robots.txt` : vérifier avant de l'activer.
+    """
 
     def catalog_page_url(self, page: int) -> str:
         pagination = "" if page == 1 else f"page/{page}/"
-        return f"{self.base_url}{self.series_path}/{pagination}?m_orderby=latest"
+        order = "" if self.catalog_order is None else f"?m_orderby={self.catalog_order}"
+        return f"{self.base_url}{self.series_path}/{pagination}{order}"
 
     def parse_catalog_page(self, document: LexborHTMLParser, page_url: str) -> list[str]:
         urls: dict[str, None] = {}  # dict = ensemble ordonné

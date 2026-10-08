@@ -41,7 +41,7 @@ def test_resolves_a_source_from_any_of_its_urls() -> None:
 def test_factory_injects_the_fetcher() -> None:
     extractor = default_registry().create("mangas-origines", FakeFetcher())
     assert isinstance(extractor, MadaraExtractor)
-    assert extractor.catalog_page_url(1) == "https://mangas-origines.fr/oeuvre/?m_orderby=latest"
+    assert extractor.catalog_page_url(1) == "https://mangas-origines.fr/oeuvre/"
 
 
 def test_unknown_slug_lists_the_available_ones() -> None:
