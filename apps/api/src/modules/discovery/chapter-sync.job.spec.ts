@@ -131,7 +131,10 @@ beforeEach(() => {
   kitsu = new FakeFeed('kitsu');
   catalog = new InMemoryCatalog();
   const transactions: TransactionRunner<ChapterSyncRepositories> = {
-    run: (work) => work({ sync: catalog, ingestion: catalog.ingestion }),
+    run: (work) => {
+      const repositories = { sync: catalog, ingestion: catalog.ingestion };
+      return work(repositories, (inner) => inner(repositories));
+    },
   };
   job = new ChapterSyncJob([mangadex, kitsu], catalog, transactions, silentLogger);
 });

@@ -162,9 +162,10 @@ describe('IngestionService', () => {
   let repo: InMemoryIngestionRepository;
   let service: IngestionService;
 
-  // « Transaction » en mémoire : exécute le travail avec le même repository.
+  // « Transaction » en mémoire : exécute le travail avec le même repository (savepoint sans retour arrière :
+  // l'annulation réelle des écritures d'une fiche en échec est vérifiée par les tests d'intégration).
   const transactions: TransactionRunner<IngestionRepositories> = {
-    run: (work) => work({ ingestion: repo }),
+    run: (work) => work({ ingestion: repo }, (inner) => inner({ ingestion: repo })),
   };
 
   const batch = (chapterNumbers: number[]): IngestBatchInput => ({
