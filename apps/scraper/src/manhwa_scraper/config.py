@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     page_timeout_ms: Annotated[int, Field(gt=0)] = 45_000
     # Politesse : intervalle minimal entre deux requêtes vers un même site.
     request_interval_s: Annotated[float, Field(ge=0)] = 1.5
+    # Durée de vie du robots.txt en cache, par site (24 h au plus selon la RFC 9309).
+    robots_ttl_s: Annotated[float, Field(gt=0, le=86_400)] = 86_400
     # Œuvres par lot envoyé à `/api/ingest/batches` (l'API en accepte 100 au plus).
     batch_size: Annotated[int, Field(ge=1, le=100)] = 20
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"

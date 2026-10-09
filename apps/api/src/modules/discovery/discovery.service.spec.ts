@@ -201,7 +201,12 @@ let mangadex: FakeProvider;
 let service: DiscoveryService;
 
 function createService(providers: ExternalCatalogProvider[]) {
-  const transactions: TransactionRunner<DiscoveryRepositories> = { run: (work) => work({ discovery: repo, jobs }) };
+  const transactions: TransactionRunner<DiscoveryRepositories> = {
+    run: (work) => {
+      const repositories = { discovery: repo, jobs };
+      return work(repositories, (inner) => inner(repositories));
+    },
+  };
   return new DiscoveryService(manhwas, repo, providers, transactions);
 }
 

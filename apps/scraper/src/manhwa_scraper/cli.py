@@ -25,7 +25,7 @@ from .config import SearchSettings, Settings, load_search_settings, load_setting
 from .contract import RunOutcome
 from .extractors import SourceExtractor, UnknownSourceError, UnsupportedDiscoveryError
 from .extractors.sites import default_registry
-from .fetching import ThrottledFetcher, TieredFetcher
+from .fetching import RobotsGuardedFetcher, RobotsPolicy, ThrottledFetcher, TieredFetcher
 from .fetching.browser import CamoufoxFetcher
 from .fetching.http import CurlCffiFetcher
 from .ingest_client import IngestClient, create_http_client
@@ -44,6 +44,8 @@ from .tracking import tracked_targets
 logger = logging.getLogger(__name__)
 
 Discovery = Literal["latest", "top"]
+SEARCH_REQUEST_INTERVAL_S = 1.5
+"""`search` ne lit pas `Settings` (ni API ni clé requises) : défaut de `SCRAPER_REQUEST_INTERVAL_S`."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,12 +179,15 @@ async def _finder(settings: SearchSettings | None) -> AsyncIterator[SeriesFinder
 
 
 async def _search(settings: SearchSettings, extractor_cls: type[SourceExtractor], title: str) -> str | None:
-    """Une requête au plus vers le site (recherche native) : pas besoin de limiter le débit."""
+    """Recherche native : robots.txt puis une requête au site, avec la même garde et le même débit qu'un run."""
     async with AsyncExitStack() as stack:
         http_fetcher = await stack.enter_async_context(CurlCffiFetcher())
         browser_fetcher = await stack.enter_async_context(CamoufoxFetcher())  # lancé seulement si challenge
+        polite = ThrottledFetcher(
+            TieredFetcher(http_fetcher, browser_fetcher), min_interval_s=SEARCH_REQUEST_INTERVAL_S
+        )
         finder = await stack.enter_async_context(_finder(settings))
-        return await finder.find(extractor_cls(TieredFetcher(http_fetcher, browser_fetcher)), title)
+        return await finder.find(extractor_cls(RobotsGuardedFetcher(polite, RobotsPolicy(polite))), title)
 
 
 def _main_search(slug: str, title: str) -> int:
@@ -217,9 +222,11 @@ async def _run(
         browser_fetcher = await stack.enter_async_context(
             CamoufoxFetcher(headless=settings.headless, timeout_ms=settings.page_timeout_ms)
         )
-        fetcher = ThrottledFetcher(
+        polite = ThrottledFetcher(
             TieredFetcher(http_fetcher, browser_fetcher), min_interval_s=settings.request_interval_s
         )
+        # robots.txt est lu par le même fetcher poli (débit limité, anti-bot) ; toute autre URL passe par la garde.
+        fetcher = RobotsGuardedFetcher(polite, RobotsPolicy(polite, ttl_s=settings.robots_ttl_s))
         api = await stack.enter_async_context(
             create_http_client(str(settings.api_url), settings.api_key.get_secret_value())
         )

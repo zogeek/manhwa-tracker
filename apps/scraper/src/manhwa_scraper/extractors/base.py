@@ -8,6 +8,7 @@ tout un CMS ; un site n'a plus qu'à déclarer son URL et, au besoin, surcharger
 Les méthodes `parse_*` sont pures (HTML → modèles) : on les teste sur des fixtures, sans réseau.
 """
 
+import logging
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -17,7 +18,9 @@ from urllib.parse import urlsplit
 from selectolax.lexbor import LexborHTMLParser
 
 from ..contract import IngestChapter, IngestManhwa
-from ..fetching import FetchError, PageFetcher
+from ..fetching import DisallowedByRobotsError, FetchError, FetchResult, PageFetcher
+
+logger = logging.getLogger(__name__)
 
 
 class ExtractionError(RuntimeError):
@@ -88,7 +91,7 @@ class SourceExtractor(ABC):
         seen: set[str] = set()
         for page in range(1, self.max_catalog_pages + 1):
             try:
-                result = await self._fetcher.fetch(self.catalog_page_url(page))
+                result = await self._fetch_catalog_page(page)
             except FetchError as error:
                 # WordPress répond 404 au-delà de la dernière page : c'est la fin du catalogue, pas une panne.
                 # Sur la page 1, en revanche, un 404 signale une URL de catalogue erronée.
@@ -103,6 +106,16 @@ class SourceExtractor(ABC):
             for url in urls:
                 seen.add(url)
                 yield url
+
+    async def _fetch_catalog_page(self, page: int) -> FetchResult:
+        """Première variante de `catalog_page_urls` que `robots.txt` autorise (les autres ne sont pas demandées)."""
+        *preferred, last = self.catalog_page_urls(page)
+        for url in preferred:
+            try:
+                return await self._fetcher.fetch(url)
+            except DisallowedByRobotsError:
+                logger.debug("%s interdite par robots.txt : variante suivante", url)
+        return await self._fetcher.fetch(last)
 
     async def discover_top(self) -> AsyncIterator[str]:
         """URLs des œuvres du « Top » du site, dans l'ordre du classement : une seule requête."""
@@ -136,6 +149,11 @@ class SourceExtractor(ABC):
     @abstractmethod
     def catalog_page_url(self, page: int) -> str:
         """URL de la page `page` (à partir de 1) du catalogue."""
+
+    def catalog_page_urls(self, page: int) -> list[str]:
+        """Variantes de la page `page`, de la préférée (ex. triée) à la plus sobre : la première permise par
+        `robots.txt` est demandée. Par défaut, la seule `catalog_page_url`."""
+        return [self.catalog_page_url(page)]
 
     @abstractmethod
     def parse_catalog_page(self, document: LexborHTMLParser, page_url: str) -> list[str]:

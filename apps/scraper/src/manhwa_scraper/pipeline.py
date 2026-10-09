@@ -18,7 +18,7 @@ from pydantic import ValidationError
 
 from .contract import HealthSample, HealthStatus, IngestBatch, IngestManhwa, RunOutcome
 from .extractors import ExtractionError, SourceExtractor, UnsupportedSeriesError
-from .fetching import BlockedByAntiBotError, FetchError
+from .fetching import BlockedByAntiBotError, DisallowedByRobotsError, FetchError
 from .ingest_client import IngestClient, IngestError
 
 logger = logging.getLogger(__name__)
@@ -30,6 +30,8 @@ class RunStats:
     series_scraped: int = 0
     series_failed: int = 0
     series_skipped: int = 0
+    series_rejected: int = 0
+    """Extraites, mais refusées une à une par l'API (le reste de leur lot est enregistré)."""
     chapters_sent: int = 0
     batches_sent: int = 0
 
@@ -106,6 +108,10 @@ class ScrapeRunner:
                 stats.series_scraped += 1
             except BlockedByAntiBotError:
                 raise
+            except DisallowedByRobotsError as error:
+                # Choix du site, pas une panne : la fiche est écartée sans dégrader le run.
+                stats.series_skipped += 1
+                logger.info("Fiche écartée : %s", error)
             except UnsupportedSeriesError as error:
                 stats.series_skipped += 1
                 logger.info("Fiche hors périmètre ignorée %s : %s", url, error)
@@ -123,6 +129,11 @@ class ScrapeRunner:
         result = await self._ingest.send_batch(batch, idempotency_key=f"{run_id}:{stats.batches_sent}")
         stats.batches_sent += 1
         stats.chapters_sent += sum(len(manhwa.chapters) for manhwa in pending)
+        stats.series_rejected += len(result.failed)
+        for rejected in result.failed:
+            logger.warning(
+                "Fiche refusée par l'API %s : %s (%s)", rejected.source_manhwa_url, rejected.message, rejected.code
+            )
         logger.info(
             "Lot %d envoyé : %d œuvres, %d chapitres créés", stats.batches_sent, len(pending), result.chapters_created
         )
@@ -162,8 +173,8 @@ def _conclude(run_id: UUID, stats: RunStats, *, allow_empty: bool) -> RunReport:
     if stats.series_found == 0 and not allow_empty:
         # Un catalogue (ou un Top) vide est presque toujours un sélecteur cassé (refonte du site), pas un site vide.
         return RunReport(run_id, RunOutcome.failed, stats, "Catalogue vide : sélecteurs à vérifier")
-    if stats.series_failed == 0:
+    if stats.series_failed == 0 and stats.series_rejected == 0:
         return RunReport(run_id, RunOutcome.succeeded, stats)
-    if stats.series_scraped == 0:
-        return RunReport(run_id, RunOutcome.failed, stats, "Aucune fiche n'a pu être extraite")
+    if stats.series_scraped == stats.series_rejected:
+        return RunReport(run_id, RunOutcome.failed, stats, "Aucune fiche n'a pu être extraite ni enregistrée")
     return RunReport(run_id, RunOutcome.partial, stats)
