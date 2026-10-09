@@ -18,7 +18,7 @@ from pydantic import ValidationError
 
 from .contract import HealthSample, HealthStatus, IngestBatch, IngestManhwa, RunOutcome
 from .extractors import ExtractionError, SourceExtractor, UnsupportedSeriesError
-from .fetching import BlockedByAntiBotError, FetchError
+from .fetching import BlockedByAntiBotError, DisallowedByRobotsError, FetchError
 from .ingest_client import IngestClient, IngestError
 
 logger = logging.getLogger(__name__)
@@ -108,6 +108,10 @@ class ScrapeRunner:
                 stats.series_scraped += 1
             except BlockedByAntiBotError:
                 raise
+            except DisallowedByRobotsError as error:
+                # Choix du site, pas une panne : la fiche est écartée sans dégrader le run.
+                stats.series_skipped += 1
+                logger.info("Fiche écartée : %s", error)
             except UnsupportedSeriesError as error:
                 stats.series_skipped += 1
                 logger.info("Fiche hors périmètre ignorée %s : %s", url, error)

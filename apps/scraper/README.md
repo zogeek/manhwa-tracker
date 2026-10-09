@@ -105,14 +105,20 @@ Ce worker alimente un **tracker personnel** : il suit les sorties de chapitres, 
   `Content-signal: ai-train=no` de scan-manga.com est respecté par construction).
 
 **`robots.txt`**
-- Vérifié **à la main, par hôte**, à l'ajout de chaque source (`www.` et un sous-domaine ont chacun le leur ; le
-  worker ne le lit pas encore automatiquement). Aucun extracteur ne vise un chemin `Disallow` applicable à
-  `User-Agent: *` (ex. `/*.php?*` sur scan-manga.com).
+- **Vérifié automatiquement avant chaque requête** (catalogue, Top, fiche, appel AJAX de chapitres) par
+  `RobotsGuardedFetcher` : une URL interdite n'est jamais demandée (`DisallowedByRobotsError`). Une fiche interdite
+  est écartée sans dégrader le run ; une page de catalogue triée interdite (`/*?m_orderby=` sur mangas-origines)
+  retombe sur sa variante sans paramètre (`catalog_page_urls`).
+- Lu une fois par origine (`www.` et un sous-domaine ont chacun le leur), gardé en cache
+  `SCRAPER_ROBOTS_TTL_S` (24 h par défaut, le maximum de la RFC 9309). Interprété par Protego (parseur de Scrapy) :
+  jokers `*`/`$`, règle la plus longue gagnante, groupes `User-Agent: *` multiples fusionnés (scan-manga en a deux).
+- Reste à relire **à la main** à l'ajout d'une source : un extracteur dont toutes les pages seraient interdites ne
+  servirait à rien, et un refus ciblé ne passe pas toujours par `robots.txt` (voir « Ligne rouge »).
 - scan-manga.com interdit nommément les robots d'IA (GPTBot, ClaudeBot…). Ce worker n'en est pas un : il ne
   moissonne pas le web pour un modèle, il consulte quelques pages pour son propriétaire. Il relève de la règle
-  générale (`User-Agent: *` → `Allow: /`).
-- Un `robots.txt` indisponible (4xx) vaut « pas de restriction » (RFC 9309, §2.3.1.3) ; une indisponibilité 5xx
-  vaut « tout est interdit ».
+  générale (jeton `manhwa-scraper`, sans groupe à son nom → `User-Agent: *`).
+- Un `robots.txt` indisponible (4xx) vaut « pas de restriction » (RFC 9309, §2.3.1.3) ; injoignable (5xx, 429,
+  réseau) vaut « tout est interdit », relu 10 min plus tard. Un challenge anti-bot sur le fichier arrête le run.
 
 **Politesse**
 - Au plus une requête toutes les 1,5 s par site (`SCRAPER_REQUEST_INTERVAL_S`), une seule requête par fiche quand

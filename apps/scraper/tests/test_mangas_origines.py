@@ -1,8 +1,6 @@
 """Premier extracteur « prêt » : fiche, chapitres et catalogue sur des fixtures synthétiques reproduisant le thème."""
 
-import re
 from datetime import datetime
-from urllib.parse import urlsplit
 
 import pytest
 from selectolax.lexbor import LexborHTMLParser
@@ -11,26 +9,15 @@ from manhwa_scraper.contract import ManhwaStatus, ManhwaType
 from manhwa_scraper.extractors.parsing import PARIS
 from manhwa_scraper.extractors.sites import default_registry
 from manhwa_scraper.extractors.sites.mangas_origines import MangasOriginesExtractor
-from manhwa_scraper.fetching import FetchError
+from manhwa_scraper.fetching import FetchError, RobotsGuardedFetcher, RobotsPolicy
 
 from .fakes import FakeFetcher, fixture
 
 SERIES = "https://mangas-origines.fr/oeuvre/lame-d-ombre/"
 CATALOG = "https://mangas-origines.fr/oeuvre/"
 CATALOG_2 = "https://mangas-origines.fr/oeuvre/page/2/"
-# `Disallow` de https://mangas-origines.fr/robots.txt pour `User-Agent: *` (relevé du 2026-10-06).
-ROBOTS_DISALLOW = (
-    "/wp-admin/",
-    "/wp-content/cache/",
-    "/wp-content/uploads/private/",
-    "/cgi-bin/",
-    "/trackback/",
-    "/xmlrpc.php",
-    "/?s=",
-    "/*?s=",
-    "/*?m_orderby=",
-    "/*?replytocom=",
-)
+ROBOTS = "https://mangas-origines.fr/robots.txt"
+ORDERED = "https://mangas-origines.fr/oeuvre/?m_orderby=latest"
 
 
 def test_is_ready_and_runnable_from_the_cli() -> None:
@@ -73,39 +60,32 @@ def test_reads_the_information_list_not_the_leftover_madara_block() -> None:
     assert info == {"année": "2024", "statut": "En cours", "type": "Manhwa", "scénario": "Auteur X"}
 
 
-async def test_walks_the_catalog_until_wordpress_answers_404() -> None:
-    fetcher = FakeFetcher()
-    fetcher.add(CATALOG, fixture("mangas_origines_catalog.html"))
-    # Pas de page 2 enregistrée : le faux fetcher répond 404, comme le site après la dernière page.
-
-    urls = [url async for url in MangasOriginesExtractor(fetcher).discover()]
-
-    assert urls == [SERIES, "https://mangas-origines.fr/oeuvre/le-dernier-archiviste/"]
-    assert [call.url for call in fetcher.calls] == [CATALOG, CATALOG_2]
-
-
 async def test_a_404_on_the_first_catalog_page_is_a_real_error() -> None:
     with pytest.raises(FetchError):
         _ = [url async for url in MangasOriginesExtractor(FakeFetcher()).discover()]
 
 
-def _robots_disallows(url: str) -> bool:
-    """Correspondance RFC 9309 : préfixe du chemin + requête, `*` = n'importe quelle suite, `$` = fin."""
-    parts = urlsplit(url)
-    target = parts.path + (f"?{parts.query}" if parts.query else "")
-    for rule in ROBOTS_DISALLOW:
-        pattern = re.escape(rule).replace(r"\*", ".*").removesuffix(r"\$")
-        if re.match(pattern + ("$" if rule.endswith("$") else ""), target):
-            return True
-    return False
+async def test_walks_the_catalog_in_default_order_until_wordpress_answers_404() -> None:
+    """`robots_mangas_origines.txt` = copie du fichier du site (relevé du 2026-10-09), qui interdit `/*?m_orderby=`."""
+    fetcher = FakeFetcher()
+    fetcher.add(ROBOTS, fixture("robots_mangas_origines.txt"))
+    fetcher.add(CATALOG, fixture("mangas_origines_catalog.html"))
+    # Pas de page 2 enregistrée : le faux fetcher répond 404, comme le site après la dernière page.
+    guarded = RobotsGuardedFetcher(fetcher, RobotsPolicy(fetcher))
+
+    urls = [url async for url in MangasOriginesExtractor(guarded).discover()]
+
+    assert urls == [SERIES, "https://mangas-origines.fr/oeuvre/le-dernier-archiviste/"]
+    # La variante triée n'est jamais demandée au site : seul le robots.txt l'a été, une fois.
+    assert [call.url for call in fetcher.calls] == [ROBOTS, CATALOG, CATALOG_2]
 
 
-def test_robots_rule_matcher_catches_the_former_catalog_url() -> None:
-    assert _robots_disallows("https://mangas-origines.fr/oeuvre/page/2/?m_orderby=latest")
+async def test_the_series_and_admin_ajax_stay_allowed() -> None:
+    fetcher = FakeFetcher()
+    fetcher.add(ROBOTS, fixture("robots_mangas_origines.txt"))
+    policy = RobotsPolicy(fetcher)
 
-
-@pytest.mark.parametrize("page", [1, 2, 50])
-def test_catalog_urls_respect_robots_txt(page: int) -> None:
-    url = MangasOriginesExtractor(FakeFetcher()).catalog_page_url(page)
-
-    assert not _robots_disallows(url), url
+    assert await policy.allowed(SERIES)
+    assert await policy.allowed("https://mangas-origines.fr/wp-admin/admin-ajax.php")
+    assert not await policy.allowed(ORDERED)
+    assert not await policy.allowed("https://mangas-origines.fr/?s=solo")

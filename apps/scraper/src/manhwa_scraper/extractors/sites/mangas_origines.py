@@ -2,8 +2,8 @@
 
 Relevé du 2026-09-27 : l'étage HTTP (curl_cffi) suffit, pas de challenge JavaScript.
 - Catalogue : Madara standard (`/oeuvre/page/N/`, 16 fiches par page, 404 après la dernière).
-  `robots.txt` interdit `/*?m_orderby=` (relevé du 2026-10-06) : on demande `/oeuvre/` sans paramètre, dont le
-  tri par défaut est déjà « dernières sorties » (fiches mises à jour il y a quelques heures en tête).
+  `robots.txt` interdit `/*?m_orderby=` (relevé du 2026-10-06) : le contrôle dynamique du fetcher fait retomber le
+  catalogue sur `/oeuvre/` sans paramètre, dont le tri par défaut est déjà « dernières sorties ».
 - Fiche : mise en page maison `ori-sr-*` ; statut et type dans une liste `<dl>` (`<dt>` libellé / `<dd>` valeur).
 - Chapitres : composant maison `ori-chl-*`, déjà complet dans la fiche (pas d'appel AJAX).
   Numéro dans `data-num` (gère 179.5), date complète dans `title` (le texte affiche « 21/06/23 »).
@@ -22,7 +22,6 @@ class MangasOriginesExtractor(MadaraExtractor):
     name: ClassVar[str] = "Mangas Origines"
     base_url: ClassVar[str] = "https://mangas-origines.fr/"
     series_path: ClassVar[str] = "oeuvre"
-    catalog_order: ClassVar[str | None] = None  # `?m_orderby=` interdit par robots.txt (voir la docstring)
     ready: ClassVar[bool] = True
     selectors: ClassVar[MadaraSelectors] = MadaraSelectors(
         title=".ori-sr-title",

@@ -8,7 +8,7 @@ from selectolax.lexbor import LexborHTMLParser
 from manhwa_scraper.contract import IngestManhwa, RunOutcome
 from manhwa_scraper.extractors import SeriesLink, UnsupportedDiscoveryError, UnsupportedSeriesError
 from manhwa_scraper.extractors.themes import MadaraExtractor
-from manhwa_scraper.fetching import FetchError
+from manhwa_scraper.fetching import FetchError, RobotsGuardedFetcher, RobotsPolicy
 from manhwa_scraper.ingest_client import IngestClient, create_http_client
 from manhwa_scraper.pipeline import ScrapeRunner, ScrapeTarget, explicit_urls
 
@@ -255,3 +255,18 @@ async def test_an_empty_tracking_list_is_not_a_failure(api: FakeIngestApi, inges
 async def explicit_targets(targets: list[ScrapeTarget]) -> AsyncIterator[ScrapeTarget]:
     for target in targets:
         yield target
+
+
+async def test_a_series_forbidden_by_robots_txt_is_skipped_without_degrading_the_run(
+    api: FakeIngestApi, fetcher: FakeFetcher, ingest: IngestClient
+) -> None:
+    fetcher.add("https://scan.test/robots.txt", "User-agent: *\nDisallow: /manga/solo/\n")
+    guarded = RobotsGuardedFetcher(fetcher, RobotsPolicy(fetcher))
+
+    report = await ScrapeRunner(
+        DemoMadara(guarded), ingest, source_id=SOURCE_ID, worker_version="test", targets=explicit_urls([SOLO, NECRO])
+    ).run()
+
+    assert report.outcome == RunOutcome.succeeded
+    assert (report.stats.series_scraped, report.stats.series_skipped) == (1, 1)
+    assert SOLO not in [call.url for call in fetcher.calls]

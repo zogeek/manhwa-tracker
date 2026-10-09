@@ -25,7 +25,7 @@ from .config import SearchSettings, Settings, load_search_settings, load_setting
 from .contract import RunOutcome
 from .extractors import SourceExtractor, UnknownSourceError, UnsupportedDiscoveryError
 from .extractors.sites import default_registry
-from .fetching import ThrottledFetcher, TieredFetcher
+from .fetching import RobotsGuardedFetcher, RobotsPolicy, ThrottledFetcher, TieredFetcher
 from .fetching.browser import CamoufoxFetcher
 from .fetching.http import CurlCffiFetcher
 from .ingest_client import IngestClient, create_http_client
@@ -211,9 +211,11 @@ async def _run(
         browser_fetcher = await stack.enter_async_context(
             CamoufoxFetcher(headless=settings.headless, timeout_ms=settings.page_timeout_ms)
         )
-        fetcher = ThrottledFetcher(
+        polite = ThrottledFetcher(
             TieredFetcher(http_fetcher, browser_fetcher), min_interval_s=settings.request_interval_s
         )
+        # robots.txt est lu par le même fetcher poli (débit limité, anti-bot) ; toute autre URL passe par la garde.
+        fetcher = RobotsGuardedFetcher(polite, RobotsPolicy(polite, ttl_s=settings.robots_ttl_s))
         api = await stack.enter_async_context(
             create_http_client(str(settings.api_url), settings.api_key.get_secret_value())
         )
