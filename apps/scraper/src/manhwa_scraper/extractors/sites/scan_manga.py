@@ -25,6 +25,10 @@ Relevé du 2026-09-27 :
   depuis `scan.data.json` (voir plus haut) ; les suggestions `qsearch.json?term=…` publiées dans `osd.xml`
   répondent elles aussi 200 au corps VIDE à un client HTTP, gabarit exact compris. Même refus ciblé : on ne le
   contourne pas. Pour suivre une œuvre absente des dernières sorties et du Top, on passe son URL (`track`).
+  Relevé du 2026-10-09 : la recherche rapide du site appelle `https://bqj.scan-manga.com/search/quick.json?term=…`.
+  Avec curl_cffi (empreinte Chrome), avec ou sans en-têtes AJAX (Origin, Referer, X-Requested-With), et pour un
+  titre existant comme pour un titre inconnu : 200, `text/html`, corps VIDE (0 octet). Le `robots.txt` de `bqj`
+  répond 403. Même refus ciblé que `qsearch.json` : `search_series` n'est pas surchargé, on garde le dorking.
 - Fiche : type dans le fil d'Ariane (Manga / Manhwa / Novel…), fiche technique en deux listes parallèles
   (libellés / valeurs), synopsis et couverture en microdonnées schema.org.
 - Chapitres : `li.chapitre` groupés par volume ; les chapitres de tomes parus en France n'ont pas de lien
