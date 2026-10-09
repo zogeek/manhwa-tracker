@@ -1,5 +1,6 @@
 """Premier extracteur « prêt » : fiche, chapitres et catalogue sur des fixtures synthétiques reproduisant le thème."""
 
+import json
 import re
 from datetime import datetime
 from urllib.parse import urlsplit
@@ -8,9 +9,10 @@ import pytest
 from selectolax.lexbor import LexborHTMLParser
 
 from manhwa_scraper.contract import ManhwaStatus, ManhwaType
+from manhwa_scraper.extractors import ExtractionError, SeriesLink
 from manhwa_scraper.extractors.parsing import PARIS
 from manhwa_scraper.extractors.sites import default_registry
-from manhwa_scraper.extractors.sites.mangas_origines import MangasOriginesExtractor
+from manhwa_scraper.extractors.sites.mangas_origines import MangasOriginesExtractor, parse_search_response
 from manhwa_scraper.fetching import FetchError
 
 from .fakes import FakeFetcher, fixture
@@ -31,6 +33,9 @@ ROBOTS_DISALLOW = (
     "/*?m_orderby=",
     "/*?replytocom=",
 )
+# `Allow` du même groupe : plus spécifique que `/wp-admin/`, il l'emporte (RFC 9309, règle la plus longue).
+ROBOTS_ALLOW = ("/wp-admin/admin-ajax.php",)
+AJAX = "https://mangas-origines.fr/wp-admin/admin-ajax.php"
 
 
 def test_is_ready_and_runnable_from_the_cli() -> None:
@@ -90,14 +95,22 @@ async def test_a_404_on_the_first_catalog_page_is_a_real_error() -> None:
 
 
 def _robots_disallows(url: str) -> bool:
-    """Correspondance RFC 9309 : préfixe du chemin + requête, `*` = n'importe quelle suite, `$` = fin."""
+    """Correspondance RFC 9309 : préfixe du chemin + requête, `*` = n'importe quelle suite, `$` = fin.
+
+    La règle la plus longue qui correspond décide ; à égalité, `Allow` l'emporte.
+    """
     parts = urlsplit(url)
     target = parts.path + (f"?{parts.query}" if parts.query else "")
-    for rule in ROBOTS_DISALLOW:
-        pattern = re.escape(rule).replace(r"\*", ".*").removesuffix(r"\$")
-        if re.match(pattern + ("$" if rule.endswith("$") else ""), target):
-            return True
-    return False
+
+    def longest(rules: tuple[str, ...]) -> int:
+        lengths = [-1]
+        for rule in rules:
+            pattern = re.escape(rule).replace(r"\*", ".*").removesuffix(r"\$")
+            if re.match(pattern + ("$" if rule.endswith("$") else ""), target):
+                lengths.append(len(rule))
+        return max(lengths)
+
+    return longest(ROBOTS_DISALLOW) > longest(ROBOTS_ALLOW)
 
 
 def test_robots_rule_matcher_catches_the_former_catalog_url() -> None:
@@ -109,3 +122,62 @@ def test_catalog_urls_respect_robots_txt(page: int) -> None:
     url = MangasOriginesExtractor(FakeFetcher()).catalog_page_url(page)
 
     assert not _robots_disallows(url), url
+
+
+def test_the_ajax_endpoint_is_explicitly_allowed_unlike_the_rest_of_wp_admin() -> None:
+    assert _robots_disallows("https://mangas-origines.fr/wp-admin/options.php")
+    assert not _robots_disallows(AJAX)
+
+
+class TestNativeSearch:
+    async def test_posts_the_child_theme_search_form_to_admin_ajax(self) -> None:
+        fetcher = FakeFetcher()
+        fetcher.add(AJAX, json.dumps({"success": True, "data": []}), method="POST")
+
+        assert await MangasOriginesExtractor(fetcher).search_series("Lame d'ombre") == []
+
+        (call,) = fetcher.calls
+        assert (call.method, call.url) == ("POST", AJAX)
+        assert call.data == {"action": "madara_child_search", "term": "Lame d'ombre"}
+        assert call.headers is not None
+        assert call.headers["Content-Type"] == "application/x-www-form-urlencoded"
+        assert call.headers["X-Requested-With"] == "XMLHttpRequest"
+
+    def test_reads_title_and_url_in_site_order_and_decodes_entities(self) -> None:
+        body = json.dumps(
+            {
+                "success": True,
+                "data": [
+                    {
+                        "title": "L&#8217;ascension",
+                        "url": "https://mangas-origines.fr/oeuvre/l-ascension/",
+                        "thumb": "https://mangas-origines.fr/wp-content/uploads/a-150x150.png",
+                        "genres": "Action · Aventure",
+                        "rating": "4.3",
+                    },
+                    {"title": "Lame d'ombre", "url": SERIES},
+                ],
+            }
+        )
+
+        assert parse_search_response(body) == [
+            SeriesLink(title="L’ascension", url="https://mangas-origines.fr/oeuvre/l-ascension/"),
+            SeriesLink(title="Lame d'ombre", url=SERIES),
+        ]
+
+    def test_a_refusal_means_no_result(self) -> None:
+        body = json.dumps({"success": False, "data": [{"error": "not found", "message": "No Posts Found"}]})
+
+        assert parse_search_response(body) == []
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            "<html>maintenance</html>",
+            '{"data": []}',
+            '{"success": true, "data": [{"title": "sans url"}]}',
+        ],
+    )
+    def test_an_unexpected_answer_is_an_extraction_error(self, body: str) -> None:
+        with pytest.raises(ExtractionError, match="inattendue"):
+            parse_search_response(body)
