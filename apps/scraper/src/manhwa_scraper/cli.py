@@ -3,6 +3,7 @@
 manhwa-scraper                         # liste les sources connues (défaut)
 manhwa-scraper run <slug> --source-id <uuid> [--discovery latest|top] [--max-series N]
 manhwa-scraper track --source-id <uuid> [<url> ...] [--urls-file fichier.txt]
+manhwa-scraper track --source-id <uuid> --from-api <slug>   # séries suivies lues dans l'API (+ recherche)
 manhwa-scraper search <slug> "<titre>"   # URL de la fiche, par dorking sur un moteur de recherche
 """
 
@@ -12,6 +13,7 @@ import logging
 import sys
 from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import AsyncExitStack, asynccontextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 from uuid import UUID
@@ -27,7 +29,7 @@ from .fetching import ThrottledFetcher, TieredFetcher
 from .fetching.browser import CamoufoxFetcher
 from .fetching.http import CurlCffiFetcher
 from .ingest_client import IngestClient, create_http_client
-from .pipeline import RunReport, ScrapeRunner, explicit_urls
+from .pipeline import RunReport, ScrapeRunner, ScrapeTarget, explicit_urls
 from .search import (
     BraveSearchEngine,
     SearchEngine,
@@ -37,10 +39,33 @@ from .search import (
     create_brave_client,
     create_searxng_client,
 )
+from .tracking import tracked_targets
+
+logger = logging.getLogger(__name__)
 
 Discovery = Literal["latest", "top"]
-Targets = Callable[[SourceExtractor], AsyncIterator[str]]
-"""Cibles d'un run, calculées une fois l'extracteur construit (il porte le fetcher)."""
+
+
+@dataclass(frozen=True, slots=True)
+class RunContext:
+    """Ce dont les cibles d'un run ont besoin, disponible seulement une fois les clients ouverts."""
+
+    extractor: SourceExtractor
+    ingest: IngestClient
+    source_id: UUID
+    finder: SeriesFinder | None
+
+
+Targets = Callable[[RunContext], AsyncIterator[str | ScrapeTarget]]
+"""Cibles d'un run, calculées une fois l'extracteur (il porte le fetcher) et le client de l'API construits."""
+
+
+@dataclass(frozen=True, slots=True)
+class RunPlan:
+    extractor_cls: type[SourceExtractor]
+    targets: Targets
+    from_api: bool = False
+    """Suivi lu dans l'API : une liste vide est normale, et les URLs manquantes se cherchent."""
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -63,6 +88,13 @@ def _parser() -> argparse.ArgumentParser:
     track.add_argument(
         "--urls-file", type=Path, default=None, help="fichier d'URLs, une par ligne (lignes vides et # ignorées)"
     )
+    track.add_argument(
+        "--from-api",
+        metavar="slug",
+        default=None,
+        help="séries suivies (listes de lecture, progression) lues dans l'API pour cette source ; "
+        "une série sans URL sur la source est cherchée via le moteur configuré (SEARXNG_URL)",
+    )
     track.add_argument("--source-id", type=UUID, required=True, help="UUID de la source dans l'API (table `sources`)")
     track.add_argument("--max-series", type=int, default=None, help="limite le nombre de fiches (essais)")
     search = commands.add_parser("search", help="trouve l'URL de la fiche d'une œuvre (dorking sur un moteur tiers)")
@@ -78,30 +110,41 @@ def _read_urls_file(path: Path) -> list[str]:
 
 def _discovery(mode: Discovery) -> Targets:
     if mode == "top":
-        return lambda extractor: extractor.discover_top()
-    return lambda extractor: extractor.discover()
+        return lambda context: context.extractor.discover_top()
+    return lambda context: context.extractor.discover()
 
 
 def _tracked(urls: list[str]) -> Targets:
-    return lambda _extractor: explicit_urls(urls)
+    return lambda _context: explicit_urls(urls)
 
 
-def _resolve(args: argparse.Namespace) -> tuple[type[SourceExtractor], Targets]:
+def _from_api(extractor_cls: type[SourceExtractor]) -> Targets:
+    return lambda context: tracked_targets(
+        context.ingest.tracked_series(context.source_id), extractor_cls, context.finder
+    )
+
+
+def _resolve(args: argparse.Namespace) -> RunPlan:
     """Extracteur et cibles du run demandé. Lève une `UnknownSourceError` / `UnsupportedDiscoveryError` sinon."""
     registry = default_registry()
-    if args.command == "track":
+    if args.command == "track" and args.from_api is not None:
+        extractor_cls = registry.get(args.from_api)
+        plan = RunPlan(extractor_cls, _from_api(extractor_cls), from_api=True)
+    elif args.command == "track":
         urls: list[str] = [*args.urls, *(_read_urls_file(args.urls_file) if args.urls_file else [])]
         extractor_cls = registry.for_urls(urls)
         # Un lien de chapitre ramène à sa fiche ; une URL que l'extracteur ne sait pas lire est gardée telle quelle.
-        targets = _tracked([extractor_cls.series_url(url) or url for url in urls])
+        plan = RunPlan(extractor_cls, _tracked([extractor_cls.series_url(url) or url for url in urls]))
     else:
         extractor_cls = registry.get(args.slug)
         if args.discovery == "top" and extractor_cls.top_page_url is None:
             raise UnsupportedDiscoveryError(f"La source « {extractor_cls.slug} » n'expose pas de Top")
-        targets = _discovery(args.discovery)
-    if not extractor_cls.ready:
-        raise UnknownSourceError(f"La source « {extractor_cls.slug} » n'est encore qu'un squelette (ready = False)")
-    return extractor_cls, targets
+        plan = RunPlan(extractor_cls, _discovery(args.discovery))
+    if not plan.extractor_cls.ready:
+        raise UnknownSourceError(
+            f"La source « {plan.extractor_cls.slug} » n'est encore qu'un squelette (ready = False)"
+        )
+    return plan
 
 
 @asynccontextmanager
@@ -115,6 +158,20 @@ async def _search_engine(settings: SearchSettings) -> AsyncIterator[SearchEngine
             yield BraveSearchEngine(http)
     else:
         raise SearchError("Aucun moteur de recherche configuré : définir SEARXNG_URL (ex. http://localhost:8080)")
+
+
+def _has_search_engine(settings: SearchSettings) -> bool:
+    return settings.searxng_url is not None or settings.brave_search_api_key is not None
+
+
+@asynccontextmanager
+async def _finder(settings: SearchSettings | None) -> AsyncIterator[SeriesFinder | None]:
+    """`None` sans réglages ou sans moteur : le run se contente alors des URLs déjà connues."""
+    if settings is None or not _has_search_engine(settings):
+        yield None
+        return
+    async with _search_engine(settings) as engine:
+        yield SeriesFinder(engine)
 
 
 async def _search(settings: SearchSettings, extractor_cls: type[SourceExtractor], title: str) -> str | None:
@@ -144,8 +201,8 @@ def _print_sources() -> None:
 
 async def _run(
     settings: Settings,
-    extractor_cls: type[SourceExtractor],
-    targets: Targets,
+    search: SearchSettings | None,
+    plan: RunPlan,
     source_id: UUID,
     max_series: int | None,
 ) -> RunReport:
@@ -160,15 +217,18 @@ async def _run(
         api = await stack.enter_async_context(
             create_http_client(str(settings.api_url), settings.api_key.get_secret_value())
         )
-        extractor = extractor_cls(fetcher)
+        finder = await stack.enter_async_context(_finder(search))
+        extractor = plan.extractor_cls(fetcher)
+        ingest = IngestClient(api)
         runner = ScrapeRunner(
             extractor,
-            IngestClient(api),
+            ingest,
             source_id=source_id,
             worker_version=__version__,
             batch_size=settings.batch_size,
             max_series=max_series,
-            targets=targets(extractor),
+            targets=plan.targets(RunContext(extractor, ingest, source_id, finder)),
+            allow_empty=plan.from_api,
         )
         return await runner.run()
 
@@ -181,14 +241,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "search":
         return _main_search(args.slug, args.title)
 
+    if args.command == "track" and args.from_api is not None and (args.urls or args.urls_file):
+        print("--from-api lit les séries suivies dans l'API : ne pas donner d'URL en plus", file=sys.stderr)
+        return 2
+
     try:
-        extractor_cls, targets = _resolve(args)
+        plan = _resolve(args)
         settings = load_settings()
+        search = load_search_settings() if plan.from_api else None
     except (UnknownSourceError, UnsupportedDiscoveryError, ValidationError, OSError) as error:
         print(error, file=sys.stderr)
         return 2
 
     logging.basicConfig(level=settings.log_level, format="%(asctime)s %(levelname)s %(name)s — %(message)s")
-    report = asyncio.run(_run(settings, extractor_cls, targets, args.source_id, args.max_series))
-    logging.getLogger(__name__).info("Run %s terminé : %s %s", report.run_id, report.outcome, report.stats)
+    if search is not None and not _has_search_engine(search):
+        logger.warning("Aucun moteur de recherche (SEARXNG_URL) : les séries suivies sans URL seront ignorées")
+    report = asyncio.run(_run(settings, search, plan, args.source_id, args.max_series))
+    logger.info("Run %s terminé : %s %s", report.run_id, report.outcome, report.stats)
     return 0 if report.outcome is not RunOutcome.failed else 1
