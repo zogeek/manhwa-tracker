@@ -4,7 +4,7 @@ import pytest
 from selectolax.lexbor import LexborHTMLParser
 
 from manhwa_scraper.contract import ManhwaStatus, ManhwaType
-from manhwa_scraper.extractors import ExtractionError, UnsupportedSeriesError
+from manhwa_scraper.extractors import ExtractionError, UnsupportedDiscoveryError, UnsupportedSeriesError
 from manhwa_scraper.extractors.sites import default_registry
 from manhwa_scraper.extractors.sites.scan_manga import ScanMangaExtractor
 
@@ -17,6 +17,16 @@ SERIES = "https://www.scan-manga.com/17231/La-Tour-Sans-Fin.html"
 def test_is_ready_and_resolves_urls_with_or_without_www() -> None:
     assert ScanMangaExtractor.ready
     assert default_registry().for_url("https://scan-manga.com/1805/Le-Royaume.html") is ScanMangaExtractor
+
+
+async def test_has_no_native_search_because_the_site_reserves_it_to_browsers() -> None:
+    # `qsearch.json` et `bqj…/search/quick.json` : 200 au corps vide pour un client HTTP (refus ciblé, cf. module).
+    fetcher = FakeFetcher()
+
+    with pytest.raises(UnsupportedDiscoveryError):
+        await ScanMangaExtractor(fetcher).search_series("Le Royaume")
+
+    assert fetcher.calls == []  # aucune requête au site : `SeriesFinder` retombe sur le dorking
 
 
 async def test_discovers_series_from_the_latest_releases_only() -> None:
