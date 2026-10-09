@@ -100,9 +100,36 @@ async def test_a_failing_series_makes_the_run_partial(
         "series_scraped": 1,
         "series_failed": 1,
         "series_skipped": 0,
+        "series_rejected": 0,
         "chapters_sent": 2,
         "batches_sent": 1,
     }
+
+
+async def test_a_series_rejected_by_the_api_makes_the_run_partial(
+    api: FakeIngestApi, fetcher: FakeFetcher, ingest: IngestClient
+) -> None:
+    fetcher.add(SOLO, fixture("madara_series_ajax.html"))
+    fetcher.add(f"{SOLO}ajax/chapters/", fixture("madara_chapters_fragment.html"), method="POST")
+    api.rejected_urls.add(NECRO)
+
+    report = await runner(fetcher, ingest).run()
+
+    assert report.outcome == RunOutcome.partial
+    assert (report.stats.series_scraped, report.stats.series_rejected) == (2, 1)
+
+
+async def test_a_run_whose_every_series_is_rejected_fails(
+    api: FakeIngestApi, fetcher: FakeFetcher, ingest: IngestClient
+) -> None:
+    api.rejected_urls.add(NECRO)
+
+    report = await ScrapeRunner(
+        DemoMadara(fetcher), ingest, source_id=SOURCE_ID, worker_version="test", targets=explicit_urls([NECRO])
+    ).run()
+
+    assert report.outcome == RunOutcome.failed
+    assert report.error == "Aucune fiche n'a pu être extraite ni enregistrée"
 
 
 async def test_an_unsupported_series_is_skipped_without_degrading_the_run(

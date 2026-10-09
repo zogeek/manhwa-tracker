@@ -80,7 +80,11 @@ Content-Type: application/json
 ```
 
 - **Idempotence** : même clé + même contenu → `200` + header `Idempotent-Replayed: true`, résultat d'origine, rien n'est réécrit.
-  Même clé + contenu différent → `409`. En cas d'erreur, tout le lot est annulé et la clé reste réutilisable.
+  Même clé + contenu différent → `409`.
+- **Succès partiel** : chaque œuvre s'écrit dans son propre `SAVEPOINT`. Une œuvre refusée (URL déjà rattachée à une
+  autre œuvre, `manhwaId` inconnu, contrainte violée) est annulée seule et listée dans `failed`
+  (`[{ sourceManhwaUrl, code, message }]`) ; le reste du lot est enregistré (`201`). Toute autre erreur (base
+  indisponible, bug) annule le lot entier et la clé reste réutilisable.
 - **Rapprochement** : URL déjà connue sur la source → fiche liée ; sinon `manhwaId` fourni ; sinon création d'une fiche.
 - **Non destructif** : synopsis / couverture / titre original ne sont remplis que s'ils sont vides ;
   `totalChapters` et `latestChapter` ne reculent jamais.

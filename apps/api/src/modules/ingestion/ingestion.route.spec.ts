@@ -46,6 +46,7 @@ const batchResultSchema = z.object({
     releasesCreated: z.number(),
     releasesUpdated: z.number(),
     coversAdded: z.number(),
+    failed: z.array(z.object({ sourceManhwaUrl: z.url(), code: z.string(), message: z.string() })),
   }),
 });
 
@@ -228,6 +229,34 @@ describe('POST /api/ingest/batches', () => {
 
     expect(first.data.manhwas[0]?.created).toBe(true);
     expect(second.data.manhwas[0]).toEqual({ ...first.data.manhwas[0], created: false });
+  });
+
+  it('saves the valid series of a batch and reports the one whose URL belongs to another series', async () => {
+    // La page Solo Leveling est déjà rattachée, sur cette source, à une autre œuvre (non suivie).
+    const other = firstOrThrow(await context.db.insert(manhwas).values({ title: 'Homonyme', type: 'manhwa' }).returning());
+    await context.db.insert(manhwaSources).values({ manhwaId: other.id, sourceId: catalog.source.id, manhwaUrl: SERIES_URL });
+    const eleceed = 'https://asura.example/series/eleceed';
+    const mixed = {
+      sourceId: catalog.source.id,
+      manhwas: [
+        ...soloLevelingBatch(catalog.source.id, [7]).manhwas,
+        { sourceManhwaUrl: eleceed, title: 'Eleceed', chapters: [{ number: 1, url: `${eleceed}/1`, language: 'fr' }] },
+      ],
+    };
+
+    const res = await ingest('/batches', mixed, { idempotencyKey: randomUUID() });
+
+    expect(res.status).toBe(201);
+    const { data } = batchResultSchema.parse(await res.json());
+    expect(data.failed).toEqual([
+      { sourceManhwaUrl: SERIES_URL, code: 'CONFLICT', message: `${SERIES_URL} is already mapped to another manhwa` },
+    ]);
+    expect(data.manhwas).toHaveLength(1);
+    expect(data).toMatchObject({ chaptersCreated: 1, releasesCreated: 1 });
+    // Rien de la fiche refusée n'est écrit ; la fiche valide l'est entièrement.
+    const releases = await context.db.select({ url: chapterReleases.url }).from(chapterReleases);
+    expect(releases).toEqual([{ url: `${eleceed}/1` }]);
+    expect(await context.db.select().from(ingestionBatches)).toHaveLength(1);
   });
 
   it('rolls the whole batch back on error and leaves the key reusable', async () => {

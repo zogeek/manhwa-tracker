@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
-import type { TransactionRunner } from '../../shared/db/transaction.js';
-import { ConflictError, NotFoundError, UnprocessableEntityError } from '../../shared/lib/errors.js';
+import { mapDatabaseError } from '../../shared/db/errors.js';
+import type { Savepoint, TransactionRunner } from '../../shared/db/transaction.js';
+import { AppError, ConflictError, NotFoundError, UnprocessableEntityError } from '../../shared/lib/errors.js';
 import type { IngestionRepository, TrackedSeries } from './ingestion.repository.js';
 import type { IngestionBatchResult, ScrapeRun } from './ingestion.schema.js';
 import type {
@@ -13,6 +14,8 @@ import type {
 } from './ingestion.validator.js';
 
 export type IngestionRepositories = { ingestion: IngestionRepository };
+
+type FailedItem = NonNullable<IngestionBatchResult['failed']>[number];
 
 export type TrackedSeriesPage = { data: TrackedSeries[]; nextCursor: string | null };
 
@@ -28,9 +31,21 @@ export function hashBatch(batch: IngestBatchInput): string {
 }
 
 /**
+ * Erreur propre à une fiche (conflit d'URL, donnée refusée par une contrainte) : la rejouer donnerait le même
+ * résultat, on peut donc l'écarter sans perdre le reste du lot. Toute autre erreur (base injoignable, bug)
+ * reste fatale : le lot entier est annulé et la clé reste libre pour un nouvel essai.
+ */
+function itemError(error: unknown): AppError | undefined {
+  const appError = error instanceof AppError ? error : mapDatabaseError(error);
+  return appError && appError.status >= 400 && appError.status < 500 ? appError : undefined;
+}
+
+/**
  * Point d'entrée du worker de scraping. Chaque lot est :
  * - idempotent : rejouer la même `Idempotency-Key` ne retraite rien ;
- * - atomique : tout le lot est commité, ou rien (une erreur annule tout, la clé reste libre) ;
+ * - tolérant par fiche : chaque œuvre s'écrit dans son propre SAVEPOINT ; une fiche refusée (`itemError`)
+ *   est annulée seule et listée dans `failed`, les autres sont enregistrées ;
+ * - atomique pour le reste : une erreur fatale annule tout le lot (la clé reste libre) ;
  * - non destructif : il complète les fiches sans écraser les corrections des admins.
  */
 export class IngestionService {
@@ -42,7 +57,7 @@ export class IngestionService {
   async ingestBatch(idempotencyKey: string, batch: IngestBatchInput): Promise<BatchOutcome> {
     const requestHash = hashBatch(batch);
 
-    return this.transactions.run(async ({ ingestion }) => {
+    return this.transactions.run(async ({ ingestion }, savepoint) => {
       await ingestion.lockIdempotencyKey(idempotencyKey);
 
       const existing = await ingestion.findBatchByKey(idempotencyKey);
@@ -57,16 +72,18 @@ export class IngestionService {
         throw new NotFoundError('Source', batch.sourceId);
       }
 
+      const failed: FailedItem[] = [];
       const result: IngestionBatchResult = {
         manhwas: [],
         chaptersCreated: 0,
         releasesCreated: 0,
         releasesUpdated: 0,
         coversAdded: 0,
+        failed,
       };
 
       for (const item of batch.manhwas) {
-        await this.ingestManhwa(ingestion, batch.sourceId, item, result);
+        await this.ingestIsolated(savepoint, batch.sourceId, item, result, failed);
       }
 
       await ingestion.insertBatch({
@@ -107,6 +124,36 @@ export class IngestionService {
     const data = rows.slice(0, limit);
     const last = data.at(-1);
     return { data, nextCursor: rows.length > limit && last ? last.manhwaId : null };
+  }
+
+  /** Une fiche dans son SAVEPOINT : en cas de refus, ses écritures et ses compteurs sont annulés ensemble. */
+  private async ingestIsolated(
+    savepoint: Savepoint<IngestionRepositories>,
+    sourceId: string,
+    item: IngestManhwaItem,
+    result: IngestionBatchResult,
+    failed: FailedItem[],
+  ): Promise<void> {
+    const itemResult: IngestionBatchResult = {
+      manhwas: [],
+      chaptersCreated: 0,
+      releasesCreated: 0,
+      releasesUpdated: 0,
+      coversAdded: 0,
+    };
+    try {
+      await savepoint(({ ingestion }) => this.ingestManhwa(ingestion, sourceId, item, itemResult));
+    } catch (error) {
+      const refused = itemError(error);
+      if (!refused) throw error;
+      failed.push({ sourceManhwaUrl: item.sourceManhwaUrl, code: refused.code, message: refused.message });
+      return;
+    }
+    result.manhwas.push(...itemResult.manhwas);
+    result.chaptersCreated += itemResult.chaptersCreated;
+    result.releasesCreated += itemResult.releasesCreated;
+    result.releasesUpdated += itemResult.releasesUpdated;
+    result.coversAdded += itemResult.coversAdded;
   }
 
   private async ingestManhwa(

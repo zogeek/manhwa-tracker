@@ -63,6 +63,8 @@ class FakeIngestApi:
     run_id: str = "5b8f2c1e-0000-4000-8000-000000000001"
     batch_failures: list[int] = field(default_factory=list)
     """Statuts renvoyés (dans l'ordre) par les premiers POST /batches avant de réussir."""
+    rejected_urls: set[str] = field(default_factory=set)
+    """Fiches que POST /batches refuse une à une (listées dans `failed`, le reste du lot passe)."""
     tracked: list[dict[str, Any]] = field(default_factory=list)
     """Séries servies par GET /tracked (JSON du contrat), paginées comme l'API : tri et curseur sur `manhwaId`."""
     requests: list[httpx.Request] = field(default_factory=list)
@@ -87,7 +89,20 @@ class FakeIngestApi:
         if (method, path) == ("POST", "/api/ingest/batches"):
             if self.batch_failures:
                 return httpx.Response(self.batch_failures.pop(0), json={"error": "boom"})
-            result = {"manhwas": [], "chaptersCreated": 2, "releasesCreated": 2, "releasesUpdated": 0, "coversAdded": 1}
+            urls = [manhwa["sourceManhwaUrl"] for manhwa in json.loads(request.content)["manhwas"]]
+            failed = [
+                {"sourceManhwaUrl": url, "code": "CONFLICT", "message": f"{url} is already mapped to another manhwa"}
+                for url in urls
+                if url in self.rejected_urls
+            ]
+            result = {
+                "manhwas": [],
+                "chaptersCreated": 2,
+                "releasesCreated": 2,
+                "releasesUpdated": 0,
+                "coversAdded": 1,
+                "failed": failed,
+            }
             return httpx.Response(201, json={"data": result})
         if (method, path) == ("GET", "/api/ingest/tracked"):
             return self._tracked_page(request.url.params)

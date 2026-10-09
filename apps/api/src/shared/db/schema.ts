@@ -625,6 +625,8 @@ export type IngestionBatchResult = {
   releasesCreated: number;
   releasesUpdated: number;
   coversAdded: number;
+  /** Fiches refusées une à une (conflit, donnée invalide) : le reste du lot est enregistré. Absent des lots antérieurs. */
+  failed?: { sourceManhwaUrl: string; code: string; message: string }[];
 };
 
 export const ingestionBatches = pgTable('ingestion_batches', {
