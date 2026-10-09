@@ -24,11 +24,19 @@ class ScrapeRun(ResponseModel):
     status: str
 
 
+class RejectedSeries(ResponseModel):
+    source_manhwa_url: str
+    code: str
+    message: str
+
+
 class BatchResult(ResponseModel):
     chapters_created: int
     releases_created: int
     releases_updated: int
     covers_added: int
+    failed: list[RejectedSeries] = []
+    """Œuvres refusées une à une par l'API (URL déjà rattachée à une autre œuvre…) ; le reste du lot passe."""
 
 
 class HealthResult(ResponseModel):
