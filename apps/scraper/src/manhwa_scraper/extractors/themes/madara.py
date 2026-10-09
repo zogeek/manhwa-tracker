@@ -54,7 +54,8 @@ class MadaraExtractor(SourceExtractor, ABC):
     catalog_order: ClassVar[str | None] = "latest"
     """Tri demandé via `?m_orderby=` ; `None` = tri par défaut du site, sans paramètre.
 
-    Beaucoup de sites Madara interdisent `/*?m_orderby=` dans leur `robots.txt` : vérifier avant de l'activer.
+    Beaucoup de sites Madara interdisent `/*?m_orderby=` dans leur `robots.txt` : le fetcher le vérifie à chaque
+    requête et, si c'est le cas, le catalogue retombe sur l'URL sans paramètre (`catalog_page_urls`).
     """
 
     @classmethod
@@ -68,9 +69,13 @@ class MadaraExtractor(SourceExtractor, ABC):
         return f"{cls.base_url}{cls.series_path}/{segments[1]}/"
 
     def catalog_page_url(self, page: int) -> str:
+        return self.catalog_page_urls(page)[0]
+
+    def catalog_page_urls(self, page: int) -> list[str]:
+        """Triée par `catalog_order` si `robots.txt` le permet, sinon dans l'ordre par défaut du site."""
         pagination = "" if page == 1 else f"page/{page}/"
-        order = "" if self.catalog_order is None else f"?m_orderby={self.catalog_order}"
-        return f"{self.base_url}{self.series_path}/{pagination}{order}"
+        plain = f"{self.base_url}{self.series_path}/{pagination}"
+        return [plain] if self.catalog_order is None else [f"{plain}?m_orderby={self.catalog_order}", plain]
 
     def parse_catalog_page(self, document: LexborHTMLParser, page_url: str) -> list[str]:
         urls: dict[str, None] = {}  # dict = ensemble ordonné
