@@ -1,7 +1,8 @@
 """Orchestration d'un run : cibles → fiches → lots vers l'API, avec télémétrie (`scrape_runs`, `source_health`).
 
 Les cibles viennent par défaut du catalogue de la source (`discover`, dernières sorties) ; on peut en fournir
-d'autres : le « Top » du site (`discover_top`) ou une liste d'URLs explicites (`explicit_urls`, séries suivies).
+d'autres : le « Top » du site (`discover_top`), une liste d'URLs explicites (`explicit_urls`) ou les séries
+suivies lues dans l'API (`ScrapeTarget` : l'URL et la fiche de l'API à laquelle la rattacher).
 
 Une fiche qui échoue n'arrête pas le run (il finit `partial`) ; un blocage anti-bot, si : insister
 ne ferait qu'aggraver le bannissement, on s'arrête et on signale la source `blocked`.
@@ -34,6 +35,13 @@ class RunStats:
 
 
 @dataclass(frozen=True, slots=True)
+class ScrapeTarget:
+    url: str
+    manhwa_id: UUID | None = None
+    """Fiche de l'API à laquelle rattacher la page : sans elle, une URL encore inconnue créerait un doublon."""
+
+
+@dataclass(frozen=True, slots=True)
 class RunReport:
     run_id: UUID
     outcome: RunOutcome
@@ -51,7 +59,8 @@ class ScrapeRunner:
         worker_version: str,
         batch_size: int = 20,
         max_series: int | None = None,
-        targets: AsyncIterable[str] | None = None,
+        targets: AsyncIterable[str | ScrapeTarget] | None = None,
+        allow_empty: bool = False,
         now: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self._extractor = extractor
@@ -60,7 +69,9 @@ class ScrapeRunner:
         self._worker_version = worker_version
         self._batch_size = batch_size
         self._max_series = max_series
-        self._targets = targets if targets is not None else extractor.discover()
+        self._targets: AsyncIterable[str | ScrapeTarget] = targets if targets is not None else extractor.discover()
+        # Un catalogue vide trahit un sélecteur cassé ; une liste de suivi vide est, elle, normale.
+        self._allow_empty = allow_empty
         self._now = now
 
     async def run(self) -> RunReport:
@@ -78,18 +89,20 @@ class ScrapeRunner:
             )
             raise
 
-        report = _conclude(run.id, stats)
+        report = _conclude(run.id, stats, allow_empty=self._allow_empty)
         await self._close(report, HealthStatus.up if report.outcome is RunOutcome.succeeded else HealthStatus.degraded)
         return report
 
     async def _scrape(self, run_id: UUID, stats: RunStats) -> None:
         pending: list[IngestManhwa] = []
-        async for url in self._targets:
+        async for target in self._targets:
             if self._max_series is not None and stats.series_found >= self._max_series:
                 break
+            url, manhwa_id = (target, None) if isinstance(target, str) else (target.url, target.manhwa_id)
             stats.series_found += 1
             try:
-                pending.append(await self._extractor.scrape_series(url))
+                manhwa = await self._extractor.scrape_series(url)
+                pending.append(manhwa if manhwa_id is None else manhwa.model_copy(update={"manhwa_id": manhwa_id}))
                 stats.series_scraped += 1
             except BlockedByAntiBotError:
                 raise
@@ -145,8 +158,8 @@ async def explicit_urls(urls: Iterable[str]) -> AsyncIterator[str]:
         yield url
 
 
-def _conclude(run_id: UUID, stats: RunStats) -> RunReport:
-    if stats.series_found == 0:
+def _conclude(run_id: UUID, stats: RunStats, *, allow_empty: bool) -> RunReport:
+    if stats.series_found == 0 and not allow_empty:
         # Un catalogue (ou un Top) vide est presque toujours un sélecteur cassé (refonte du site), pas un site vide.
         return RunReport(run_id, RunOutcome.failed, stats, "Catalogue vide : sélecteurs à vérifier")
     if stats.series_failed == 0:
