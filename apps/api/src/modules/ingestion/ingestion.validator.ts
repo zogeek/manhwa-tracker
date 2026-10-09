@@ -1,8 +1,9 @@
-import { createInsertSchema } from 'drizzle-zod';
+import { createInsertSchema, createSelectSchema } from 'drizzle-zod';
 import { z } from 'zod';
 import {
   chapterKindEnum,
   chapterReleases,
+  manhwaSources,
   manhwas,
   scrapeRuns,
   sourceHealth,
@@ -107,6 +108,38 @@ export const ingestBatchSchema = z
   })
   .meta({ id: 'IngestBatch' });
 
+// ---- Séries suivies (GET /tracked) ----
+
+export const TRACKED_SERIES_MAX_LIMIT = 500;
+
+export const trackedSeriesQuerySchema = z
+  .object({
+    sourceId: z.uuid(),
+    /** `nextCursor` de la page précédente ; absent pour la première page. */
+    cursor: z.uuid().optional(),
+    limit: z.coerce.number().int().min(1).max(TRACKED_SERIES_MAX_LIMIT).default(100),
+  })
+  .meta({ id: 'TrackedSeriesQuery' });
+
+/** Œuvre de la source présente dans au moins une liste de lecture : à re-scraper en priorité. */
+const trackedSeriesSchema = createSelectSchema(manhwaSources, {
+  /** URL de la fiche sur la source ; `null` si elle n'a pas encore été découverte. */
+  manhwaUrl: z.url().nullable(),
+  latestChapter: chapterNumberSchema.nullable(),
+  lastScrapedAt: z.iso.datetime({ offset: true }).nullable(),
+})
+  .pick({ manhwaId: true, manhwaUrl: true, latestChapter: true, lastScrapedAt: true })
+  .extend(createSelectSchema(manhwas).pick({ title: true }).shape)
+  .meta({ id: 'TrackedSeries' });
+
+export const trackedSeriesPageSchema = z
+  .object({
+    data: z.array(trackedSeriesSchema),
+    /** À renvoyer en `?cursor=` pour la page suivante ; `null` sur la dernière page. */
+    nextCursor: z.uuid().nullable(),
+  })
+  .meta({ id: 'TrackedSeriesPage' });
+
 export const idempotencyHeaderSchema = z.object({
   'idempotency-key': z.string().min(8).max(200),
 });
@@ -117,5 +150,6 @@ export type StartRunInput = z.infer<typeof startRunSchema>;
 export type FinishRunInput = z.infer<typeof finishRunSchema>;
 export type RecordHealthInput = z.infer<typeof recordHealthSchema>;
 export type IngestBatchInput = z.infer<typeof ingestBatchSchema>;
+export type TrackedSeriesQuery = z.infer<typeof trackedSeriesQuerySchema>;
 export type IngestManhwaItem = IngestBatchInput['manhwas'][number];
 export type IngestChapterItem = IngestManhwaItem['chapters'][number];

@@ -1,4 +1,4 @@
-import { and, eq, isNull, notInArray, sql } from 'drizzle-orm';
+import { and, asc, eq, exists, gt, isNull, notInArray, sql } from 'drizzle-orm';
 import type { DbClient } from '../../shared/db/index.js';
 import {
   chapterReleaseGroups,
@@ -6,6 +6,8 @@ import {
   manhwaCovers,
   manhwaSources,
   manhwas,
+  readingListItems,
+  readingLists,
   scanlationGroups,
   sources,
 } from '../../shared/db/schema.js';
@@ -47,6 +49,17 @@ export type TeamInput = {
   externalId: string | null;
 };
 
+/** Œuvre suivie par au moins un lecteur, telle que connue sur une source donnée. */
+export type TrackedSeries = {
+  manhwaId: string;
+  title: string;
+  manhwaUrl: string | null;
+  latestChapter: number | null;
+  lastScrapedAt: Date | null;
+};
+
+export type TrackedSeriesPageQuery = { cursor?: string; limit: number };
+
 export type UpsertedRelease = { id: string; created: boolean };
 
 export interface IngestionRepository {
@@ -80,6 +93,11 @@ export interface IngestionRepository {
   findRun(id: string): Promise<ScrapeRun | null>;
   finishRun(id: string, data: FinishRunInput): Promise<ScrapeRun | null>;
   insertHealthSamples(samples: NewSourceHealth[]): Promise<number>;
+  /**
+   * Œuvres liées à la source et présentes dans au moins une liste de lecture active, une seule
+   * fois chacune, triées par `manhwaId` (pagination par curseur : ids strictement après `cursor`).
+   */
+  findTrackedSeries(sourceId: string, page: TrackedSeriesPageQuery): Promise<TrackedSeries[]>;
 }
 
 export class DrizzleIngestionRepository implements IngestionRepository {
@@ -290,5 +308,36 @@ export class DrizzleIngestionRepository implements IngestionRepository {
   async insertHealthSamples(samples: NewSourceHealth[]): Promise<number> {
     const rows = await this.db.insert(sourceHealth).values(samples).returning({ id: sourceHealth.id });
     return rows.length;
+  }
+
+  async findTrackedSeries(sourceId: string, { cursor, limit }: TrackedSeriesPageQuery): Promise<TrackedSeries[]> {
+    // Semi-jointure (EXISTS) plutôt que JOIN : une œuvre présente dans N listes ne sort qu'une fois,
+    // sans DISTINCT ni GROUP BY, et Postgres s'arrête à la première liste trouvée.
+    const inAnActiveReadingList = this.db
+      .select({ one: sql`1` })
+      .from(readingListItems)
+      .innerJoin(readingLists, eq(readingLists.id, readingListItems.listId))
+      .where(and(eq(readingListItems.manhwaId, manhwaSources.manhwaId), isNull(readingLists.deletedAt)));
+
+    return this.db
+      .select({
+        manhwaId: manhwaSources.manhwaId,
+        title: manhwas.title,
+        manhwaUrl: manhwaSources.manhwaUrl,
+        latestChapter: manhwaSources.latestChapter,
+        lastScrapedAt: manhwaSources.lastScrapedAt,
+      })
+      .from(manhwaSources)
+      .innerJoin(manhwas, eq(manhwas.id, manhwaSources.manhwaId))
+      .where(
+        and(
+          eq(manhwaSources.sourceId, sourceId),
+          isNull(manhwas.deletedAt),
+          exists(inAnActiveReadingList),
+          cursor ? gt(manhwaSources.manhwaId, cursor) : undefined,
+        ),
+      )
+      .orderBy(asc(manhwaSources.manhwaId))
+      .limit(limit);
   }
 }

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { TransactionRunner } from '../../shared/db/transaction.js';
 import { ConflictError, NotFoundError, UnprocessableEntityError } from '../../shared/lib/errors.js';
-import type { IngestionRepository } from './ingestion.repository.js';
+import type { IngestionRepository, TrackedSeries } from './ingestion.repository.js';
 import type { IngestionBatchResult, ScrapeRun } from './ingestion.schema.js';
 import type {
   FinishRunInput,
@@ -9,9 +9,12 @@ import type {
   IngestManhwaItem,
   RecordHealthInput,
   StartRunInput,
+  TrackedSeriesQuery,
 } from './ingestion.validator.js';
 
 export type IngestionRepositories = { ingestion: IngestionRepository };
+
+export type TrackedSeriesPage = { data: TrackedSeries[]; nextCursor: string | null };
 
 export type BatchOutcome = {
   /** `true` : la clé avait déjà été traitée, le résultat d'origine est renvoyé tel quel. */
@@ -92,6 +95,18 @@ export class IngestionService {
 
   async recordHealth({ samples }: RecordHealthInput): Promise<number> {
     return this.repo.insertHealthSamples(samples);
+  }
+
+  /** Œuvres de la source suivies par au moins un lecteur : la liste de travail du worker. */
+  async listTrackedSeries({ sourceId, cursor, limit }: TrackedSeriesQuery): Promise<TrackedSeriesPage> {
+    if (!(await this.repo.sourceExists(sourceId))) {
+      throw new NotFoundError('Source', sourceId);
+    }
+    // Une ligne de plus que demandé : sa présence prouve qu'une page suivante existe.
+    const rows = await this.repo.findTrackedSeries(sourceId, { cursor, limit: limit + 1 });
+    const data = rows.slice(0, limit);
+    const last = data.at(-1);
+    return { data, nextCursor: rows.length > limit && last ? last.manhwaId : null };
   }
 
   private async ingestManhwa(

@@ -9,11 +9,15 @@ import {
   ingestionBatches,
   manhwaSources,
   manhwas,
+  readingListItems,
+  readingLists,
   scanlationGroups,
   sourceHealth,
 } from '../../shared/db/schema.js';
 import { seedCatalog, type SeededCatalog } from '../../shared/db/seed.test.js';
-import { createTestContext, TEST_SCRAPER_API_KEY } from '../../test/integration.js';
+import { firstOrThrow } from '../../shared/db/utils.js';
+import { createTestContext, signUp, TEST_SCRAPER_API_KEY } from '../../test/integration.js';
+import { trackedSeriesPageSchema } from './ingestion.validator.js';
 
 const context = createTestContext();
 let catalog: SeededCatalog;
@@ -264,5 +268,143 @@ describe('scrape runs and source health', () => {
 
     expect(res.status).toBe(201);
     expect(await context.db.select().from(sourceHealth)).toHaveLength(2);
+  });
+});
+
+describe('GET /api/ingest/tracked', () => {
+  /** Appel machine en lecture : clé valide par défaut, `key: null` pour l'omettre. */
+  function tracked(query: Record<string, string>, { key = TEST_SCRAPER_API_KEY }: { key?: string | null } = {}) {
+    const headers: Record<string, string> = {};
+    if (key !== null) headers['x-api-key'] = key;
+    return context.app.request(`/api/ingest/tracked?${new URLSearchParams(query)}`, { headers });
+  }
+
+  async function createManhwa(title: string, deletedAt: Date | null = null) {
+    return firstOrThrow(await context.db.insert(manhwas).values({ title, deletedAt }).returning()).id;
+  }
+
+  async function createList(userId: string, manhwaIds: string[], deletedAt: Date | null = null) {
+    const list = firstOrThrow(
+      await context.db.insert(readingLists).values({ userId, name: 'À lire', deletedAt }).returning(),
+    );
+    await context.db.insert(readingListItems).values(manhwaIds.map((manhwaId) => ({ listId: list.id, manhwaId })));
+  }
+
+  /**
+   * Catalogue de la source Asura :
+   * - Solo Leveling : URL connue, dans les listes d'Alice ET de Bob → renvoyée une seule fois ;
+   * - « Sans URL » : suivie, lien créé sans URL → renvoyée avec `manhwaUrl: null` ;
+   * - « Personne » : liée à la source mais dans aucune liste → écartée ;
+   * - « Liste supprimée » : seulement dans une liste soft-deleted → écartée ;
+   * - « Fiche supprimée » : suivie mais fiche soft-deleted → écartée ;
+   * - « Autre source » : suivie, mais liée uniquement à Phenix → écartée.
+   */
+  async function seedTracking() {
+    const alice = await signUp(context, 'alice');
+    const bob = await signUp(context, 'bob');
+    const noUrl = await createManhwa('Sans URL');
+    const untracked = await createManhwa('Personne');
+    const deletedListOnly = await createManhwa('Liste supprimée');
+    const deletedManhwa = await createManhwa('Fiche supprimée', new Date());
+    const otherSourceOnly = await createManhwa('Autre source');
+
+    const sourceId = catalog.source.id;
+    await context.db.insert(manhwaSources).values([
+      { manhwaId: catalog.manhwa.id, sourceId, manhwaUrl: SERIES_URL, latestChapter: 3 },
+      { manhwaId: noUrl, sourceId, manhwaUrl: null },
+      { manhwaId: untracked, sourceId, manhwaUrl: 'https://asura.example/series/personne' },
+      { manhwaId: deletedListOnly, sourceId, manhwaUrl: 'https://asura.example/series/liste-supprimee' },
+      { manhwaId: deletedManhwa, sourceId, manhwaUrl: 'https://asura.example/series/fiche-supprimee' },
+      { manhwaId: otherSourceOnly, sourceId: catalog.otherSource.id, manhwaUrl: 'https://phenix.example/autre' },
+    ]);
+
+    await createList(alice.id, [catalog.manhwa.id, noUrl, deletedManhwa, otherSourceOnly]);
+    await createList(bob.id, [catalog.manhwa.id]);
+    await createList(bob.id, [deletedListOnly], new Date());
+
+    return { noUrl };
+  }
+
+  it.each([
+    ['no key', null],
+    ['a wrong key', 'definitely-not-the-scraper-key-0123456789'],
+  ])('rejects a request sent with %s (401)', async (_label, key) => {
+    const res = await tracked({ sourceId: catalog.source.id }, { key });
+
+    expect(res.status).toBe(401);
+  });
+
+  it('does not accept a Better Auth session instead of the key', async () => {
+    const alice = await signUp(context, 'alice');
+    const res = await context.app.request(`/api/ingest/tracked?sourceId=${catalog.source.id}`, {
+      headers: alice.headers,
+    });
+
+    expect(res.status).toBe(401);
+  });
+
+  it('returns only the series of this source that sit in an active reading list, once each', async () => {
+    const { noUrl } = await seedTracking();
+
+    const res = await tracked({ sourceId: catalog.source.id });
+
+    expect(res.status).toBe(200);
+    // La réponse respecte le contrat consommé par le worker Python.
+    const page = trackedSeriesPageSchema.parse(await res.json());
+    expect(page.nextCursor).toBeNull();
+    expect(page.data).toHaveLength(2);
+    expect(page.data).toEqual(
+      expect.arrayContaining([
+        {
+          manhwaId: catalog.manhwa.id,
+          title: 'Solo Leveling',
+          manhwaUrl: SERIES_URL,
+          latestChapter: 3,
+          lastScrapedAt: null,
+        },
+        { manhwaId: noUrl, title: 'Sans URL', manhwaUrl: null, latestChapter: null, lastScrapedAt: null },
+      ]),
+    );
+  });
+
+  it('returns an empty page once nobody follows the series of the source anymore', async () => {
+    await seedTracking();
+    await context.db.delete(readingListItems);
+
+    const res = await tracked({ sourceId: catalog.source.id });
+
+    expect(trackedSeriesPageSchema.parse(await res.json())).toEqual({ data: [], nextCursor: null });
+  });
+
+  it('pages through the tracked series with a cursor', async () => {
+    await seedTracking();
+
+    const first = trackedSeriesPageSchema.parse(await (await tracked({ sourceId: catalog.source.id, limit: '1' })).json());
+    expect(first.data).toHaveLength(1);
+    expect(first.nextCursor).toBe(first.data[0]?.manhwaId);
+
+    const cursor = first.nextCursor ?? '';
+    const second = trackedSeriesPageSchema.parse(
+      await (await tracked({ sourceId: catalog.source.id, limit: '1', cursor })).json(),
+    );
+    expect(second.data).toHaveLength(1);
+    expect(second.data[0]?.manhwaId).not.toBe(first.data[0]?.manhwaId);
+    expect(second.nextCursor).toBeNull();
+  });
+
+  it('answers 404 for an unknown source', async () => {
+    const unknown = await tracked({ sourceId: randomUUID() });
+
+    expect(unknown.status).toBe(404);
+  });
+
+  it.each([
+    ['a missing sourceId', {}],
+    ['a malformed sourceId', { sourceId: 'not-a-uuid' }],
+    ['a limit above the maximum', { sourceId: '00000000-0000-4000-8000-000000000000', limit: '501' }],
+  ])('rejects %s (400)', async (_label, query) => {
+    const res = await tracked(query);
+
+    expect(res.status).toBe(400);
   });
 });
