@@ -4,7 +4,7 @@ manhwa-scraper                         # liste les sources connues (défaut)
 manhwa-scraper run <slug> --source-id <uuid> [--discovery latest|top] [--max-series N]
 manhwa-scraper track --source-id <uuid> [<url> ...] [--urls-file fichier.txt]
 manhwa-scraper track --source-id <uuid> --from-api <slug>   # séries suivies lues dans l'API (+ recherche)
-manhwa-scraper search <slug> "<titre>"   # URL de la fiche, par dorking sur un moteur de recherche
+manhwa-scraper search <slug> "<titre>"   # URL de la fiche : recherche native du site, sinon dorking
 """
 
 import argparse
@@ -53,7 +53,7 @@ class RunContext:
     extractor: SourceExtractor
     ingest: IngestClient
     source_id: UUID
-    finder: SeriesFinder | None
+    finder: SeriesFinder
 
 
 Targets = Callable[[RunContext], AsyncIterator[str | ScrapeTarget]]
@@ -93,11 +93,13 @@ def _parser() -> argparse.ArgumentParser:
         metavar="slug",
         default=None,
         help="séries suivies (listes de lecture, progression) lues dans l'API pour cette source ; "
-        "une série sans URL sur la source est cherchée via le moteur configuré (SEARXNG_URL)",
+        "une série sans URL sur la source est cherchée (recherche native du site, sinon SEARXNG_URL)",
     )
     track.add_argument("--source-id", type=UUID, required=True, help="UUID de la source dans l'API (table `sources`)")
     track.add_argument("--max-series", type=int, default=None, help="limite le nombre de fiches (essais)")
-    search = commands.add_parser("search", help="trouve l'URL de la fiche d'une œuvre (dorking sur un moteur tiers)")
+    search = commands.add_parser(
+        "search", help="trouve l'URL de la fiche d'une œuvre (recherche native du site, sinon dorking)"
+    )
     search.add_argument("slug", help="slug de la source (voir `sources`)")
     search.add_argument("title", help="titre de l'œuvre, tel qu'affiché sur le site")
     return parser
@@ -118,9 +120,9 @@ def _tracked(urls: list[str]) -> Targets:
     return lambda _context: explicit_urls(urls)
 
 
-def _from_api(extractor_cls: type[SourceExtractor]) -> Targets:
+def _from_api() -> Targets:
     return lambda context: tracked_targets(
-        context.ingest.tracked_series(context.source_id), extractor_cls, context.finder
+        context.ingest.tracked_series(context.source_id), context.extractor, context.finder
     )
 
 
@@ -129,7 +131,7 @@ def _resolve(args: argparse.Namespace) -> RunPlan:
     registry = default_registry()
     if args.command == "track" and args.from_api is not None:
         extractor_cls = registry.get(args.from_api)
-        plan = RunPlan(extractor_cls, _from_api(extractor_cls), from_api=True)
+        plan = RunPlan(extractor_cls, _from_api(), from_api=True)
     elif args.command == "track":
         urls: list[str] = [*args.urls, *(_read_urls_file(args.urls_file) if args.urls_file else [])]
         extractor_cls = registry.for_urls(urls)
@@ -165,18 +167,22 @@ def _has_search_engine(settings: SearchSettings) -> bool:
 
 
 @asynccontextmanager
-async def _finder(settings: SearchSettings | None) -> AsyncIterator[SeriesFinder | None]:
-    """`None` sans réglages ou sans moteur : le run se contente alors des URLs déjà connues."""
+async def _finder(settings: SearchSettings | None) -> AsyncIterator[SeriesFinder]:
+    """Sans réglages ou sans moteur, seules les sources à recherche native savent encore chercher."""
     if settings is None or not _has_search_engine(settings):
-        yield None
+        yield SeriesFinder(None)
         return
     async with _search_engine(settings) as engine:
         yield SeriesFinder(engine)
 
 
 async def _search(settings: SearchSettings, extractor_cls: type[SourceExtractor], title: str) -> str | None:
-    async with _search_engine(settings) as engine:
-        return await SeriesFinder(engine).find(extractor_cls, title)
+    """Une requête au plus vers le site (recherche native) : pas besoin de limiter le débit."""
+    async with AsyncExitStack() as stack:
+        http_fetcher = await stack.enter_async_context(CurlCffiFetcher())
+        browser_fetcher = await stack.enter_async_context(CamoufoxFetcher())  # lancé seulement si challenge
+        finder = await stack.enter_async_context(_finder(settings))
+        return await finder.find(extractor_cls(TieredFetcher(http_fetcher, browser_fetcher)), title)
 
 
 def _main_search(slug: str, title: str) -> int:
@@ -255,7 +261,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     logging.basicConfig(level=settings.log_level, format="%(asctime)s %(levelname)s %(name)s — %(message)s")
     if search is not None and not _has_search_engine(search):
-        logger.warning("Aucun moteur de recherche (SEARXNG_URL) : les séries suivies sans URL seront ignorées")
+        logger.warning(
+            "Aucun moteur de recherche (SEARXNG_URL) : sans recherche native sur la source, "
+            "les séries suivies sans URL seront ignorées"
+        )
     report = asyncio.run(_run(settings, search, plan, args.source_id, args.max_series))
     logger.info("Run %s terminé : %s %s", report.run_id, report.outcome, report.stats)
     return 0 if report.outcome is not RunOutcome.failed else 1
