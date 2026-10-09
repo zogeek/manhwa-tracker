@@ -19,7 +19,15 @@ from playwright.async_api import Browser, BrowserContext, Playwright, Response, 
 from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
-from .base import CHALLENGE_TITLES, BlockedByAntiBotError, FetchError, FetchResult, HttpMethod, detect_challenge
+from .base import (
+    CHALLENGE_TITLES,
+    BlockedByAntiBotError,
+    FetchError,
+    FetchResult,
+    HttpMethod,
+    detect_challenge,
+    form_body,
+)
 
 
 class CamoufoxFetcher:
@@ -63,13 +71,17 @@ class CamoufoxFetcher:
         *,
         method: HttpMethod = "GET",
         headers: Mapping[str, str] | None = None,
+        data: Mapping[str, str] | None = None,
     ) -> FetchResult:
         context = await self._ensure_context()
         started = time.perf_counter()
         try:
             if method == "POST":
                 # Appels AJAX (ex. liste de chapitres Madara) : même jar de cookies que les pages déjà franchies.
-                api_response = await context.request.post(url, headers=dict(headers or {}), timeout=self._timeout_ms)
+                request_headers, body = form_body(headers, data)
+                api_response = await context.request.post(
+                    url, headers=request_headers, data=body, timeout=self._timeout_ms
+                )
                 status, html, final_url = api_response.status, await api_response.text(), api_response.url
             else:
                 status, html, final_url = await self._navigate(context, url, headers)

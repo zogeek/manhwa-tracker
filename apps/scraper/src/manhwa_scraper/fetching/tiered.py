@@ -33,15 +33,16 @@ class TieredFetcher:
         *,
         method: HttpMethod = "GET",
         headers: Mapping[str, str] | None = None,
+        data: Mapping[str, str] | None = None,
     ) -> FetchResult:
         host = _host(url)
         if host not in self._escalated:
             try:
-                return await self._fast.fetch(url, method=method, headers=headers)
+                return await self._fast.fetch(url, method=method, headers=headers, data=data)
             except BlockedByAntiBotError as error:
                 logger.info("%s protégé par %s : bascule sur le navigateur", host, error.blocked_by)
                 self._escalated.add(host)
-        return await self._browser.fetch(url, method=method, headers=headers)
+        return await self._browser.fetch(url, method=method, headers=headers, data=data)
 
 
 class ThrottledFetcher:
@@ -68,6 +69,7 @@ class ThrottledFetcher:
         *,
         method: HttpMethod = "GET",
         headers: Mapping[str, str] | None = None,
+        data: Mapping[str, str] | None = None,
     ) -> FetchResult:
         host = _host(url)
         async with self._locks.setdefault(host, asyncio.Lock()):
@@ -77,6 +79,6 @@ class ThrottledFetcher:
                 if wait > 0:
                     await self._sleep(wait)
             try:
-                return await self._inner.fetch(url, method=method, headers=headers)
+                return await self._inner.fetch(url, method=method, headers=headers, data=data)
             finally:
                 self._last_request[host] = self._clock()

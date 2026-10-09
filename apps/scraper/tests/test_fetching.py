@@ -1,6 +1,7 @@
 import pytest
 
 from manhwa_scraper.fetching import BlockedByAntiBotError, ThrottledFetcher, TieredFetcher, detect_challenge
+from manhwa_scraper.fetching.base import form_body
 
 from .fakes import FakeFetcher, blocked, fixture
 
@@ -19,6 +20,22 @@ class TestDetectChallenge:
         # Les pages déjà franchies chargent aussi ce script : il ne doit pas suffire à conclure au blocage.
         html = '<html><head><title>Solo Leveling</title><script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js">'
         assert detect_challenge(html) is None
+
+
+class TestFormBody:
+    def test_encodes_the_fields_and_declares_a_form(self) -> None:
+        headers, body = form_body({"X-Requested-With": "XMLHttpRequest"}, {"action": "find", "term": "Solo & Co"})
+
+        assert body == "action=find&term=Solo+%26+Co"
+        assert headers == {"X-Requested-With": "XMLHttpRequest", "Content-Type": "application/x-www-form-urlencoded"}
+
+    def test_keeps_an_explicit_content_type(self) -> None:
+        headers, _ = form_body({"content-type": "application/x-www-form-urlencoded; charset=UTF-8"}, {"a": "1"})
+
+        assert headers == {"content-type": "application/x-www-form-urlencoded; charset=UTF-8"}
+
+    def test_no_data_means_no_body(self) -> None:
+        assert form_body(None, None) == ({}, None)
 
 
 class TestTieredFetcher:
@@ -43,6 +60,15 @@ class TestTieredFetcher:
 
         assert (first.tier, second.tier) == ("browser", "browser")
         assert [call.url for call in fast.calls] == [URL_A]  # plus de requête rapide vers ce site
+
+    async def test_forwards_the_form_to_the_browser_tier(self) -> None:
+        fast, browser = FakeFetcher(), FakeFetcher(tier="browser")
+        fast.add(URL_A, blocked(URL_A), method="POST")
+        browser.add(URL_A, "{}", method="POST")
+
+        await TieredFetcher(fast, browser).fetch(URL_A, method="POST", data={"term": "solo"})
+
+        assert [call.data for call in (*fast.calls, *browser.calls)] == [{"term": "solo"}, {"term": "solo"}]
 
     async def test_propagates_a_block_from_the_browser_tier(self) -> None:
         fast, browser = FakeFetcher(), FakeFetcher(tier="browser")
