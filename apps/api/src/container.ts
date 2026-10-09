@@ -31,6 +31,8 @@ import { DrizzleJobRepository } from './modules/jobs/job.repository.js';
 import { JobWorker, type JobLogger } from './modules/jobs/job.worker.js';
 import { DrizzleIngestionRepository } from './modules/ingestion/ingestion.repository.js';
 import { IngestionService } from './modules/ingestion/ingestion.service.js';
+import { DrizzleManhwaSourceRepository } from './modules/manhwa-sources/manhwa-source.repository.js';
+import { ManhwaSourceService } from './modules/manhwa-sources/manhwa-source.service.js';
 import { DrizzleManhwaRepository } from './modules/manhwas/manhwa.repository.js';
 import { ManhwaService } from './modules/manhwas/manhwa.service.js';
 import { DrizzleReadingListRepository } from './modules/reading-lists/reading-list.repository.js';
@@ -141,6 +143,7 @@ export function createContainer({ db, auth, integrations, jobs }: ContainerOptio
     services: {
       sources: new SourceService(new DrizzleSourceRepository(db)),
       manhwas: new ManhwaService(manhwaRepository),
+      manhwaSources: new ManhwaSourceService(new DrizzleManhwaSourceRepository(db)),
       discovery: new DiscoveryService(
         manhwaRepository,
         new DrizzleDiscoveryRepository(db),

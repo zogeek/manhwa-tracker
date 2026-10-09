@@ -7,6 +7,7 @@ import type { Services } from './container.js';
 import { createChapterRoutes } from './modules/chapters/chapter.route.js';
 import { createImageRoutes } from './modules/images/image.route.js';
 import { createIngestionRoutes } from './modules/ingestion/ingestion.route.js';
+import { createManhwaSourceRoutes } from './modules/manhwa-sources/manhwa-source.route.js';
 import { createManhwaRoutes } from './modules/manhwas/manhwa.route.js';
 import { createReadingListRoutes } from './modules/reading-lists/reading-list.route.js';
 import { createReadingProgressRoutes } from './modules/reading-progress/reading-progress.route.js';
@@ -50,6 +51,7 @@ export function createApp({ services, auth, corsOrigins, scraperApiKey, logReque
     .get('/health', (c) => c.json({ status: 'ok' }))
     .route('/sources', createSourceRoutes(services.sources, authMiddleware))
     .route('/manhwas', createManhwaRoutes(services.manhwas, services.discovery, authMiddleware))
+    .route('/manhwas', createManhwaSourceRoutes(services.manhwaSources, authMiddleware))
     .route('/chapters', createChapterRoutes(services.chapters, authMiddleware))
     .route('/taxonomy', createTaxonomyRoutes(services.taxonomy, authMiddleware))
     .route('/reading', createReadingProgressRoutes(services.readingProgress, authMiddleware))
