@@ -224,6 +224,50 @@ describe('IngestionService', () => {
     });
   });
 
+  describe('partial batch success', () => {
+    const otherUrl = 'https://asura.example/series/eleceed';
+    const twoSeries = (): IngestBatchInput => {
+      const solo = batch([1, 2]).manhwas[0];
+      if (!solo) throw new Error('lot de test vide');
+      return {
+        sourceId,
+        manhwas: [
+          { ...solo, manhwaId: randomUUID() }, // URL déjà rattachée à une autre œuvre → conflit
+          { sourceManhwaUrl: otherUrl, title: 'Eleceed', chapters: [{ number: 1, url: `${otherUrl}/1`, language: 'fr' }] },
+        ],
+      };
+    };
+
+    beforeEach(() => {
+      repo.mappings.set(`${sourceId}|https://asura.example/series/solo-leveling`, randomUUID());
+    });
+
+    it('skips a conflicting series, keeps the others and reports the refused one', async () => {
+      const { result } = await service.ingestBatch('key-partial-1', twoSeries());
+
+      expect(result.failed).toEqual([
+        {
+          sourceManhwaUrl: 'https://asura.example/series/solo-leveling',
+          code: 'CONFLICT',
+          message: 'https://asura.example/series/solo-leveling is already mapped to another manhwa',
+        },
+      ]);
+      expect(result.manhwas.map((m) => m.sourceManhwaUrl)).toEqual([otherUrl]);
+      // Les compteurs ne reflètent que les fiches enregistrées.
+      expect(result).toMatchObject({ chaptersCreated: 1, releasesCreated: 1, releasesUpdated: 0 });
+      expect(repo.batches.get('key-partial-1')?.result).toEqual(result);
+    });
+
+    it('still fails the whole batch on an unexpected error (the key stays reusable)', async () => {
+      repo.upsertChapter = async () => {
+        throw new Error('connexion perdue');
+      };
+
+      await expect(service.ingestBatch('key-partial-2', batch([1]))).rejects.toThrow('connexion perdue');
+      expect(repo.batches.has('key-partial-2')).toBe(false);
+    });
+  });
+
   describe('scrape runs', () => {
     it('finishes a running run once, then answers Conflict', async () => {
       const run = await service.startRun({ sourceId });
