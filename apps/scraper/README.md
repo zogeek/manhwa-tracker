@@ -23,12 +23,20 @@ d'AniList. Il sert au « dernier kilomètre » francophone : savoir **où** lire
 | Dernières sorties | `run <slug> --source-id …` | 1 page de listing + 1 par fiche | suivi des nouveautés, lancé souvent |
 | Top du site | `run <slug> --source-id … --discovery top` | 1 page (le Top) + 1 par fiche | suggestions : ce que lit la communauté |
 | URL directe | `track --source-id … <url> [<url>…]` ou `--urls-file suivies.txt` | 1 par fiche, aucun catalogue | séries suivies par les utilisateurs |
+| Suivi depuis l'API | `track --source-id … --from-api <slug>` | 1 par fiche (+ 1 recherche par URL manquante, chez le moteur) | toutes les séries suivies, sans liste à tenir |
 
 En mode `track`, la source est déduite du domaine de chaque URL (toutes doivent appartenir à la même source, car un
 run est rattaché à une ligne de `sources`). Le fichier contient une URL par ligne ; lignes vides et `#` ignorées.
 Seules les sources qui exposent un Top côté serveur acceptent `--discovery top` (aujourd'hui : scan-manga).
 
 En mode `track`, un lien de chapitre est ramené à sa fiche (`SourceExtractor.series_url`).
+
+**`track --from-api <slug>`** lit `GET /api/ingest/tracked` (clé de service, curseur suivi jusqu'à la dernière page) :
+une série est suivie dès qu'elle est dans une liste de lecture active ou qu'un utilisateur a une progression dessus.
+Les séries dont l'URL est connue sur la source sont scrapées d'abord ; pour les autres, l'URL est cherchée par
+dorking (`search`, ci-dessous) puis la page est rattachée à l'œuvre de l'API (`manhwaId`) : le lien source ↔ œuvre
+est créé, sans fiche en double. Sans moteur configuré, ou s'il tombe en panne, seules les URLs connues sont scrapées ;
+une page trouvée qui appartient déjà à une autre œuvre suivie est écartée. Une liste de suivi vide n'est pas un échec.
 
 **Recherche sur le site : non disponible.** Aucune source prête ne l'autorise : scan-manga la sert uniquement aux
 navigateurs (refus ciblé, voir « Ligne rouge ») et le `robots.txt` de mangas-origines interdit `/?s=`.
@@ -59,7 +67,7 @@ uv run manhwa-scraper track --source-id <uuid> "$(uv run manhwa-scraper search s
 
 | Script | Rôle |
 |---|---|
-| `dev` | `manhwa-scraper` : liste les sources (`sources`) ; `run <slug>` lance un scraping ; `track <url>…` scrape des fiches précises ; `search <slug> "<titre>"` trouve une fiche |
+| `dev` | `manhwa-scraper` : liste les sources (`sources`) ; `run <slug>` lance un scraping ; `track <url>…` scrape des fiches précises (`track --from-api <slug>` : les séries suivies) ; `search <slug> "<titre>"` trouve une fiche |
 | `lint` / `format` | Ruff (lint + formatage) |
 | `typecheck` | mypy `--strict` (plugin Pydantic) |
 | `test` | pytest — aucun réseau, aucun navigateur (fakes + fixtures HTML synthétiques ; SearXNG et Brave simulés par `httpx.MockTransport`) |

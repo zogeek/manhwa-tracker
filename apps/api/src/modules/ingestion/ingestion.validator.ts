@@ -121,9 +121,9 @@ export const trackedSeriesQuerySchema = z
   })
   .meta({ id: 'TrackedSeriesQuery' });
 
-/** Œuvre de la source présente dans au moins une liste de lecture : à re-scraper en priorité. */
+/** Œuvre suivie (liste de lecture ou progression) : à re-scraper, ou à chercher sur la source si `manhwaUrl` est `null`. */
 const trackedSeriesSchema = createSelectSchema(manhwaSources, {
-  /** URL de la fiche sur la source ; `null` si elle n'a pas encore été découverte. */
+  /** URL de la fiche sur la source ; `null` si elle n'a pas encore été découverte (ou l'œuvre pas encore liée). */
   manhwaUrl: z.url().nullable(),
   latestChapter: chapterNumberSchema.nullable(),
   lastScrapedAt: z.iso.datetime({ offset: true }).nullable(),

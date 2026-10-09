@@ -6,16 +6,18 @@ from uuid import UUID
 import pytest
 
 from manhwa_scraper import cli
-from manhwa_scraper.cli import Targets, main
+from manhwa_scraper.cli import RunContext, RunPlan, main
 from manhwa_scraper.config import SearchSettings, Settings
 from manhwa_scraper.contract import RunOutcome
 from manhwa_scraper.extractors import SourceExtractor
-from manhwa_scraper.pipeline import RunReport, RunStats
+from manhwa_scraper.ingest_client import IngestClient, create_http_client
+from manhwa_scraper.pipeline import RunReport, RunStats, ScrapeTarget
 from manhwa_scraper.search import BraveSearchEngine, SearchError, SearxngSearchEngine
 
-from .fakes import FakeFetcher
+from .fakes import FakeFetcher, FakeIngestApi, tracked_series
 
 SOURCE_ID = "0c7e1f0a-0000-4000-8000-000000000001"
+SERIES_ID = "a1000000-0000-4000-8000-000000000001"
 
 
 @pytest.fixture(autouse=True)
@@ -74,23 +76,31 @@ def test_a_valid_track_command_only_then_reads_the_configuration(capsys: pytest.
     assert "api_url" in capsys.readouterr().err  # arguments acceptés : c'est la configuration absente qui bloque
 
 
-def test_track_brings_chapter_links_back_to_their_series_page(monkeypatch: pytest.MonkeyPatch) -> None:
-    seen: list[str] = []
+@pytest.fixture
+def collected_targets(monkeypatch: pytest.MonkeyPatch) -> list[str | ScrapeTarget]:
+    """Remplace `_run` : les cibles du run sont collectées (API simulée par `FakeIngestApi`), rien n'est scrapé."""
+    seen: list[str | ScrapeTarget] = []
 
     async def fake_run(
         settings: Settings,
-        extractor_cls: type[SourceExtractor],
-        targets: Targets,
+        search: SearchSettings | None,
+        plan: RunPlan,
         source_id: UUID,
         max_series: int | None,
     ) -> RunReport:
-        seen.extend([url async for url in targets(extractor_cls(FakeFetcher()))])
+        api = FakeIngestApi(tracked=[tracked_series(SERIES_ID, "Necro", "https://mangas-origines.fr/oeuvre/necro/")])
+        async with create_http_client("http://api.test", "k" * 32, transport=api.transport()) as http:
+            context = RunContext(plan.extractor_cls(FakeFetcher()), IngestClient(http), source_id, finder=None)
+            seen.extend([target async for target in plan.targets(context)])
         return RunReport(source_id, RunOutcome.succeeded, RunStats())
 
     monkeypatch.setenv("SCRAPER_API_URL", "http://api.test")
     monkeypatch.setenv("SCRAPER_API_KEY", "k" * 32)
     monkeypatch.setattr(cli, "_run", fake_run)
+    return seen
 
+
+def test_track_brings_chapter_links_back_to_their_series_page(collected_targets: list[str | ScrapeTarget]) -> None:
     code = main(
         [
             "track",
@@ -102,7 +112,41 @@ def test_track_brings_chapter_links_back_to_their_series_page(monkeypatch: pytes
     )
 
     assert code == 0
-    assert seen == ["https://mangas-origines.fr/oeuvre/solo/", "https://mangas-origines.fr/oeuvre/necro/"]
+    assert collected_targets == ["https://mangas-origines.fr/oeuvre/solo/", "https://mangas-origines.fr/oeuvre/necro/"]
+
+
+class TestTrackFromApi:
+    def test_reads_the_tracked_series_from_the_api(self, collected_targets: list[str | ScrapeTarget]) -> None:
+        assert main(["track", "--source-id", SOURCE_ID, "--from-api", "mangas-origines"]) == 0
+        assert collected_targets == [
+            ScrapeTarget(url="https://mangas-origines.fr/oeuvre/necro/", manhwa_id=UUID(SERIES_ID))
+        ]
+
+    def test_refuses_urls_alongside(self, capsys: pytest.CaptureFixture[str]) -> None:
+        code = main(
+            ["track", "--source-id", SOURCE_ID, "--from-api", "mangas-origines", "https://mangas-origines.fr/oeuvre/a/"]
+        )
+
+        assert code == 2
+        assert "ne pas donner d'URL" in capsys.readouterr().err
+
+    def test_refuses_an_unknown_source(self, capsys: pytest.CaptureFixture[str]) -> None:
+        assert main(["track", "--source-id", SOURCE_ID, "--from-api", "inconnue"]) == 2
+        assert "inconnue" in capsys.readouterr().err
+
+    def test_refuses_a_skeleton_source(self, capsys: pytest.CaptureFixture[str]) -> None:
+        assert main(["track", "--source-id", SOURCE_ID, "--from-api", "rimuscan"]) == 2
+        assert "squelette" in capsys.readouterr().err
+
+    async def test_runs_without_a_search_engine(self) -> None:
+        async with cli._finder(SearchSettings()) as finder:
+            assert finder is None
+
+    async def test_uses_the_configured_search_engine(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("SEARXNG_URL", "http://localhost:8080")
+
+        async with cli._finder(SearchSettings()) as finder:
+            assert finder is not None
 
 
 class TestSearch:

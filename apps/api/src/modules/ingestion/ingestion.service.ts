@@ -97,7 +97,7 @@ export class IngestionService {
     return this.repo.insertHealthSamples(samples);
   }
 
-  /** Œuvres de la source suivies par au moins un lecteur : la liste de travail du worker. */
+  /** Œuvres suivies par au moins un lecteur, liées ou non à la source : la liste de travail du worker. */
   async listTrackedSeries({ sourceId, cursor, limit }: TrackedSeriesQuery): Promise<TrackedSeriesPage> {
     if (!(await this.repo.sourceExists(sourceId))) {
       throw new NotFoundError('Source', sourceId);

@@ -10,7 +10,7 @@ from manhwa_scraper.extractors import SeriesLink, UnsupportedDiscoveryError, Uns
 from manhwa_scraper.extractors.themes import MadaraExtractor
 from manhwa_scraper.fetching import FetchError
 from manhwa_scraper.ingest_client import IngestClient, create_http_client
-from manhwa_scraper.pipeline import ScrapeRunner, explicit_urls
+from manhwa_scraper.pipeline import ScrapeRunner, ScrapeTarget, explicit_urls
 
 from .fakes import FakeFetcher, FakeIngestApi, blocked, fixture, no_sleep
 
@@ -191,3 +191,40 @@ async def test_a_source_without_top_refuses_the_top_discovery(fetcher: FakeFetch
     with pytest.raises(UnsupportedDiscoveryError):
         [url async for url in DemoMadara(fetcher).discover_top()]
     assert fetcher.calls == []
+
+
+async def test_a_tracked_target_attaches_the_page_to_its_api_series(
+    api: FakeIngestApi, fetcher: FakeFetcher, ingest: IngestClient
+) -> None:
+    manhwa_id = UUID("a1000000-0000-4000-8000-000000000001")
+    targets = explicit_targets([ScrapeTarget(url=NECRO, manhwa_id=manhwa_id)])
+
+    report = await ScrapeRunner(
+        DemoMadara(fetcher), ingest, source_id=SOURCE_ID, worker_version="test", targets=targets
+    ).run()
+
+    assert report.outcome == RunOutcome.succeeded
+    [batch] = api.bodies("POST", "/api/ingest/batches")
+    assert [(m["sourceManhwaUrl"], m["manhwaId"]) for m in batch["manhwas"]] == [(NECRO, str(manhwa_id))]
+
+
+async def test_an_empty_tracking_list_is_not_a_failure(api: FakeIngestApi, ingest: IngestClient) -> None:
+    fetcher = FakeFetcher()
+
+    report = await ScrapeRunner(
+        DemoMadara(fetcher),
+        ingest,
+        source_id=SOURCE_ID,
+        worker_version="test",
+        targets=explicit_targets([]),
+        allow_empty=True,
+    ).run()
+
+    assert report.outcome == RunOutcome.succeeded
+    assert fetcher.calls == []
+    assert api.bodies("POST", "/api/ingest/batches") == []
+
+
+async def explicit_targets(targets: list[ScrapeTarget]) -> AsyncIterator[ScrapeTarget]:
+    for target in targets:
+        yield target

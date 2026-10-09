@@ -11,6 +11,7 @@ import {
   manhwas,
   readingListItems,
   readingLists,
+  readingProgress,
   scanlationGroups,
   sourceHealth,
 } from '../../shared/db/schema.js';
@@ -291,38 +292,49 @@ describe('GET /api/ingest/tracked', () => {
   }
 
   /**
-   * Catalogue de la source Asura :
+   * Catalogue vu depuis la source Asura :
    * - Solo Leveling : URL connue, dans les listes d'Alice ET de Bob → renvoyée une seule fois ;
    * - « Sans URL » : suivie, lien créé sans URL → renvoyée avec `manhwaUrl: null` ;
-   * - « Personne » : liée à la source mais dans aucune liste → écartée ;
+   * - « Progression seule » : dans aucune liste, mais Carol la lit → renvoyée ;
+   * - « Autre source » : suivie, liée uniquement à Phenix → renvoyée sans URL (à chercher sur Asura) ;
+   * - « Orpheline » : suivie, liée à aucune source → renvoyée sans URL ;
+   * - « Personne » : liée à la source mais ni en liste ni en cours de lecture → écartée ;
    * - « Liste supprimée » : seulement dans une liste soft-deleted → écartée ;
-   * - « Fiche supprimée » : suivie mais fiche soft-deleted → écartée ;
-   * - « Autre source » : suivie, mais liée uniquement à Phenix → écartée.
+   * - « Fiche supprimée » : suivie mais fiche soft-deleted → écartée.
    */
   async function seedTracking() {
     const alice = await signUp(context, 'alice');
     const bob = await signUp(context, 'bob');
+    const carol = await signUp(context, 'carol');
     const noUrl = await createManhwa('Sans URL');
+    const progressOnly = await createManhwa('Progression seule');
+    const otherSourceOnly = await createManhwa('Autre source');
+    const orphan = await createManhwa('Orpheline');
     const untracked = await createManhwa('Personne');
     const deletedListOnly = await createManhwa('Liste supprimée');
     const deletedManhwa = await createManhwa('Fiche supprimée', new Date());
-    const otherSourceOnly = await createManhwa('Autre source');
 
     const sourceId = catalog.source.id;
     await context.db.insert(manhwaSources).values([
       { manhwaId: catalog.manhwa.id, sourceId, manhwaUrl: SERIES_URL, latestChapter: 3 },
       { manhwaId: noUrl, sourceId, manhwaUrl: null },
+      { manhwaId: progressOnly, sourceId, manhwaUrl: 'https://asura.example/series/progression', latestChapter: 12 },
+      { manhwaId: otherSourceOnly, sourceId: catalog.otherSource.id, manhwaUrl: 'https://phenix.example/autre' },
       { manhwaId: untracked, sourceId, manhwaUrl: 'https://asura.example/series/personne' },
       { manhwaId: deletedListOnly, sourceId, manhwaUrl: 'https://asura.example/series/liste-supprimee' },
       { manhwaId: deletedManhwa, sourceId, manhwaUrl: 'https://asura.example/series/fiche-supprimee' },
-      { manhwaId: otherSourceOnly, sourceId: catalog.otherSource.id, manhwaUrl: 'https://phenix.example/autre' },
     ]);
 
-    await createList(alice.id, [catalog.manhwa.id, noUrl, deletedManhwa, otherSourceOnly]);
+    await createList(alice.id, [catalog.manhwa.id, noUrl, deletedManhwa, otherSourceOnly, orphan]);
     await createList(bob.id, [catalog.manhwa.id]);
     await createList(bob.id, [deletedListOnly], new Date());
+    await context.db.insert(readingProgress).values([
+      { userId: carol.id, manhwaId: progressOnly, currentChapter: 4, furthestChapter: 4 },
+      { userId: carol.id, manhwaId: catalog.manhwa.id, currentChapter: 2, furthestChapter: 2 },
+      { userId: carol.id, manhwaId: deletedManhwa },
+    ]);
 
-    return { noUrl };
+    return { noUrl, progressOnly, otherSourceOnly, orphan };
   }
 
   it.each([
@@ -343,8 +355,8 @@ describe('GET /api/ingest/tracked', () => {
     expect(res.status).toBe(401);
   });
 
-  it('returns only the series of this source that sit in an active reading list, once each', async () => {
-    const { noUrl } = await seedTracking();
+  it('returns every followed series once, with its URL on this source when it is known', async () => {
+    const { noUrl, progressOnly, otherSourceOnly, orphan } = await seedTracking();
 
     const res = await tracked({ sourceId: catalog.source.id });
 
@@ -352,7 +364,8 @@ describe('GET /api/ingest/tracked', () => {
     // La réponse respecte le contrat consommé par le worker Python.
     const page = trackedSeriesPageSchema.parse(await res.json());
     expect(page.nextCursor).toBeNull();
-    expect(page.data).toHaveLength(2);
+    expect(page.data).toHaveLength(5);
+    const toFind = { manhwaUrl: null, latestChapter: null, lastScrapedAt: null };
     expect(page.data).toEqual(
       expect.arrayContaining([
         {
@@ -362,34 +375,58 @@ describe('GET /api/ingest/tracked', () => {
           latestChapter: 3,
           lastScrapedAt: null,
         },
-        { manhwaId: noUrl, title: 'Sans URL', manhwaUrl: null, latestChapter: null, lastScrapedAt: null },
+        {
+          manhwaId: progressOnly,
+          title: 'Progression seule',
+          manhwaUrl: 'https://asura.example/series/progression',
+          latestChapter: 12,
+          lastScrapedAt: null,
+        },
+        { manhwaId: noUrl, title: 'Sans URL', ...toFind },
+        // L'URL Phenix ne fuit pas : seule compte la fiche sur la source demandée.
+        { manhwaId: otherSourceOnly, title: 'Autre source', ...toFind },
+        { manhwaId: orphan, title: 'Orpheline', ...toFind },
       ]),
     );
+  });
+
+  it('keeps a series followed through reading progress alone', async () => {
+    const { progressOnly } = await seedTracking();
+    await context.db.delete(readingListItems);
+
+    const page = trackedSeriesPageSchema.parse(await (await tracked({ sourceId: catalog.source.id })).json());
+
+    expect(page.data.map((series) => series.manhwaId).sort()).toEqual([catalog.manhwa.id, progressOnly].sort());
   });
 
   it('returns an empty page once nobody follows the series of the source anymore', async () => {
     await seedTracking();
     await context.db.delete(readingListItems);
+    await context.db.delete(readingProgress);
 
     const res = await tracked({ sourceId: catalog.source.id });
 
     expect(trackedSeriesPageSchema.parse(await res.json())).toEqual({ data: [], nextCursor: null });
   });
 
-  it('pages through the tracked series with a cursor', async () => {
+  it('pages through the tracked series with a cursor, without gaps nor duplicates', async () => {
     await seedTracking();
 
-    const first = trackedSeriesPageSchema.parse(await (await tracked({ sourceId: catalog.source.id, limit: '1' })).json());
-    expect(first.data).toHaveLength(1);
-    expect(first.nextCursor).toBe(first.data[0]?.manhwaId);
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    let pages = 0;
+    do {
+      const query: Record<string, string> = { sourceId: catalog.source.id, limit: '2', ...(cursor ? { cursor } : {}) };
+      const page = trackedSeriesPageSchema.parse(await (await tracked(query)).json());
+      seen.push(...page.data.map((series) => series.manhwaId));
+      cursor = page.nextCursor;
+      pages += 1;
+    } while (cursor);
 
-    const cursor = first.nextCursor ?? '';
-    const second = trackedSeriesPageSchema.parse(
-      await (await tracked({ sourceId: catalog.source.id, limit: '1', cursor })).json(),
-    );
-    expect(second.data).toHaveLength(1);
-    expect(second.data[0]?.manhwaId).not.toBe(first.data[0]?.manhwaId);
-    expect(second.nextCursor).toBeNull();
+    expect(pages).toBe(3); // 2 + 2 + 1
+    expect(seen).toHaveLength(5);
+    expect(new Set(seen).size).toBe(5);
+    expect(seen).toEqual([...seen].sort());
   });
 
   it('answers 404 for an unknown source', async () => {
