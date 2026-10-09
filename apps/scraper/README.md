@@ -179,6 +179,28 @@ et on peut toujours demander l'autorisation à ses administrateurs.
 | Validation | **Pydantic v2** (+ pydantic-settings) | Modèles **générés** depuis le contrat Zod de l'API (datamodel-codegen) : un champ faux échoue côté worker, avec un message lisible, avant l'envoi. |
 | Client API | **httpx** + **tenacity** | Async, timeouts, transport mockable en test ; ré-essais exponentiels uniquement quand rejouer est sans danger (lots idempotents). |
 
+### Pourquoi pas Scrapy ? (décision du 2026-10-09)
+
+Une migration vers Scrapy a été étudiée puis **refusée**. Scrapy est un excellent moteur de **moissonnage en masse**
+(ordonnanceur, des centaines de requêtes en parallèle, pipelines d'export). Notre besoin est presque l'inverse :
+peu de requêtes (une par fiche, au plus une toutes les 1,5 s par site) mais **chacune doit passer** des protections
+anti-bot agressives (Cloudflare bot management, WAF qui filtrent sur la poignée de main TLS).
+
+| Critère | Stack actuelle | Scrapy |
+|---|---|---|
+| Empreinte réseau | curl_cffi rejoue Chrome sur toutes les couches (TLS JA3/JA4, HTTP/2, en-têtes) : c'est ce qui fait passer scan-manga.com. | Téléchargeur Twisted : empreinte TLS de Python, rejetée par ces WAF. Il faut greffer curl_cffi ou Playwright par des plugins tiers (`scrapy-impersonate`, `scrapy-playwright`), qui contournent justement son téléchargeur. |
+| Escalade HTTP → navigateur | `TieredFetcher` : HTTP d'abord, Camoufox seulement sur challenge détecté, choix **mémorisé par site** pour le reste du run. | Pas natif : un middleware maison, couplé au cycle de vie Twisted/asyncio de Scrapy. |
+| Modèle d'exécution | `asyncio` pur, comme httpx et Playwright : un seul modèle de concurrence. | Réacteur Twisted (pont asyncio possible, mais une couche de plus à déboguer). |
+| Tests et injection de dépendances | Les extracteurs ne voient que le protocole `PageFetcher` : un faux fetcher suffit, sans réseau (cf. `tests/fakes.py`). | Les « spiders » sont pilotés par le moteur : les tester demande de simuler ses objets `Request`/`Response`. |
+| Ce qu'on reprendrait de Scrapy | Son parseur `robots.txt` (**Protego**) est déjà utilisé, seul. | — |
+
+Concrètement, Scrapy imposerait un cadre rigide et en grande partie inutile ici (débit, export), alors que la valeur du
+worker tient dans un contrôle fin de **chaque** requête : empreinte, étage, débit, arrêt au premier blocage.
+
+Cette « furtivité » sert à passer les filtres **génériques**, jamais un refus ciblé (voir « Ligne rouge »). Le
+framework n'y change rien : avec Scrapy, la recherche de scan-manga resterait tout autant hors limites.
+
+À rouvrir si le besoin change de nature : crawl de milliers de pages par run, sur des sites sans protection anti-bot.
 
 ## Architecture
 
