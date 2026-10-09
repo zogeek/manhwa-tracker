@@ -1,4 +1,4 @@
-import { and, asc, eq, exists, gt, isNull, notInArray, sql } from 'drizzle-orm';
+import { and, asc, eq, exists, gt, isNull, notInArray, or, sql } from 'drizzle-orm';
 import type { DbClient } from '../../shared/db/index.js';
 import {
   chapterReleaseGroups,
@@ -8,6 +8,7 @@ import {
   manhwas,
   readingListItems,
   readingLists,
+  readingProgress,
   scanlationGroups,
   sources,
 } from '../../shared/db/schema.js';
@@ -94,8 +95,9 @@ export interface IngestionRepository {
   finishRun(id: string, data: FinishRunInput): Promise<ScrapeRun | null>;
   insertHealthSamples(samples: NewSourceHealth[]): Promise<number>;
   /**
-   * Œuvres liées à la source et présentes dans au moins une liste de lecture active, une seule
-   * fois chacune, triées par `manhwaId` (pagination par curseur : ids strictement après `cursor`).
+   * Œuvres suivies (dans une liste de lecture active OU avec une progression de lecture), une seule
+   * fois chacune, qu'elles soient déjà liées à la source ou non (`manhwaUrl: null` : URL à trouver).
+   * Triées par `manhwaId` (pagination par curseur : ids strictement après `cursor`).
    */
   findTrackedSeries(sourceId: string, page: TrackedSeriesPageQuery): Promise<TrackedSeries[]>;
 }
@@ -311,33 +313,39 @@ export class DrizzleIngestionRepository implements IngestionRepository {
   }
 
   async findTrackedSeries(sourceId: string, { cursor, limit }: TrackedSeriesPageQuery): Promise<TrackedSeries[]> {
-    // Semi-jointure (EXISTS) plutôt que JOIN : une œuvre présente dans N listes ne sort qu'une fois,
-    // sans DISTINCT ni GROUP BY, et Postgres s'arrête à la première liste trouvée.
+    // Semi-jointures (EXISTS) plutôt que JOIN : une œuvre suivie par N lecteurs ne sort qu'une fois,
+    // sans DISTINCT ni GROUP BY, et Postgres s'arrête à la première ligne trouvée.
     const inAnActiveReadingList = this.db
       .select({ one: sql`1` })
       .from(readingListItems)
       .innerJoin(readingLists, eq(readingLists.id, readingListItems.listId))
-      .where(and(eq(readingListItems.manhwaId, manhwaSources.manhwaId), isNull(readingLists.deletedAt)));
+      .where(and(eq(readingListItems.manhwaId, manhwas.id), isNull(readingLists.deletedAt)));
+    const withReadingProgress = this.db
+      .select({ one: sql`1` })
+      .from(readingProgress)
+      .where(eq(readingProgress.manhwaId, manhwas.id));
 
     return this.db
       .select({
-        manhwaId: manhwaSources.manhwaId,
+        manhwaId: manhwas.id,
         title: manhwas.title,
         manhwaUrl: manhwaSources.manhwaUrl,
         latestChapter: manhwaSources.latestChapter,
         lastScrapedAt: manhwaSources.lastScrapedAt,
       })
-      .from(manhwaSources)
-      .innerJoin(manhwas, eq(manhwas.id, manhwaSources.manhwaId))
+      .from(manhwas)
+      // LEFT JOIN : une œuvre suivie mais encore inconnue de la source sort avec `manhwaUrl: null`,
+      // c'est elle que le worker ira chercher. Le filtre sur la source est dans le ON, pas le WHERE,
+      // sinon il écarterait justement ces orphelines.
+      .leftJoin(manhwaSources, and(eq(manhwaSources.manhwaId, manhwas.id), eq(manhwaSources.sourceId, sourceId)))
       .where(
         and(
-          eq(manhwaSources.sourceId, sourceId),
           isNull(manhwas.deletedAt),
-          exists(inAnActiveReadingList),
-          cursor ? gt(manhwaSources.manhwaId, cursor) : undefined,
+          or(exists(inAnActiveReadingList), exists(withReadingProgress)),
+          cursor ? gt(manhwas.id, cursor) : undefined,
         ),
       )
-      .orderBy(asc(manhwaSources.manhwaId))
+      .orderBy(asc(manhwas.id))
       .limit(limit);
   }
 }
