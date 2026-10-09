@@ -23,6 +23,7 @@ class FetchCall:
     url: str
     method: HttpMethod
     headers: Mapping[str, str] | None
+    data: Mapping[str, str] | None = None
 
 
 @dataclass
@@ -42,8 +43,9 @@ class FakeFetcher:
         *,
         method: HttpMethod = "GET",
         headers: Mapping[str, str] | None = None,
+        data: Mapping[str, str] | None = None,
     ) -> FetchResult:
-        self.calls.append(FetchCall(url, method, headers))
+        self.calls.append(FetchCall(url, method, headers, data))
         body = self.pages.get((method, url))
         if body is None:
             raise FetchError(f"{method} {url} -> 404", url=url, status=404)

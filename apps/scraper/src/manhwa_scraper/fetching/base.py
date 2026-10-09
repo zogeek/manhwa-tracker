@@ -8,6 +8,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal, Protocol
+from urllib.parse import urlencode
 
 HttpMethod = Literal["GET", "POST"]
 FetchTier = Literal["http", "browser"]
@@ -30,9 +31,26 @@ class PageFetcher(Protocol):
         *,
         method: HttpMethod = "GET",
         headers: Mapping[str, str] | None = None,
+        data: Mapping[str, str] | None = None,
     ) -> FetchResult:
-        """HTML de la page, après les éventuels challenges anti-bot. Lève une `FetchError` sinon."""
+        """HTML de la page, après les éventuels challenges anti-bot. Lève une `FetchError` sinon.
+
+        `data` : champs d'un formulaire envoyés en corps de requête (POST AJAX), encodés par `form_body`.
+        """
         ...
+
+
+FORM_CONTENT_TYPE = "application/x-www-form-urlencoded"
+
+
+def form_body(headers: Mapping[str, str] | None, data: Mapping[str, str] | None) -> tuple[dict[str, str], str | None]:
+    """En-têtes et corps d'une requête : `data` encodé en formulaire, `Content-Type` ajouté s'il manque."""
+    merged = dict(headers or {})
+    if data is None:
+        return merged, None
+    if not any(name.lower() == "content-type" for name in merged):
+        merged["Content-Type"] = FORM_CONTENT_TYPE
+    return merged, urlencode(data)
 
 
 class FetchError(RuntimeError):

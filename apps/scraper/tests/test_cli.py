@@ -12,7 +12,7 @@ from manhwa_scraper.contract import RunOutcome
 from manhwa_scraper.extractors import SourceExtractor
 from manhwa_scraper.ingest_client import IngestClient, create_http_client
 from manhwa_scraper.pipeline import RunReport, RunStats, ScrapeTarget
-from manhwa_scraper.search import BraveSearchEngine, SearchError, SearxngSearchEngine
+from manhwa_scraper.search import BraveSearchEngine, SearchError, SearxngSearchEngine, SeriesFinder
 
 from .fakes import FakeFetcher, FakeIngestApi, tracked_series
 
@@ -90,7 +90,7 @@ def collected_targets(monkeypatch: pytest.MonkeyPatch) -> list[str | ScrapeTarge
     ) -> RunReport:
         api = FakeIngestApi(tracked=[tracked_series(SERIES_ID, "Necro", "https://mangas-origines.fr/oeuvre/necro/")])
         async with create_http_client("http://api.test", "k" * 32, transport=api.transport()) as http:
-            context = RunContext(plan.extractor_cls(FakeFetcher()), IngestClient(http), source_id, finder=None)
+            context = RunContext(plan.extractor_cls(FakeFetcher()), IngestClient(http), source_id, SeriesFinder(None))
             seen.extend([target async for target in plan.targets(context)])
         return RunReport(source_id, RunOutcome.succeeded, RunStats())
 
@@ -140,7 +140,7 @@ class TestTrackFromApi:
 
     async def test_runs_without_a_search_engine(self) -> None:
         async with cli._finder(SearchSettings()) as finder:
-            assert finder is None
+            assert finder is not None  # les sources à recherche native restent cherchables
 
     async def test_uses_the_configured_search_engine(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("SEARXNG_URL", "http://localhost:8080")

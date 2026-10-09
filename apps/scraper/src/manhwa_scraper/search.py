@@ -1,4 +1,9 @@
-"""Recherche de la fiche d'une œuvre par « dorking » : `site:scan-manga.com "Titre"` posé à un moteur tiers.
+"""Recherche de la fiche d'une œuvre : recherche native du site si elle existe, sinon « dorking ».
+
+Recherche native : la source interroge son propre moteur (`SourceExtractor.search_series`, ex. l'API AJAX
+de mangas-origines). Elle est prioritaire : une requête au site, résultats à jour, aucun tiers.
+
+Dorking (repli) : `site:scan-manga.com "Titre"` posé à un moteur tiers.
 
 Le site cible ne reçoit aucune requête : on interroge l'index que le moteur a déjà construit. Le moteur doit
 autoriser l'automatisation, ce qui exclut la page HTML d'un moteur grand public (DuckDuckGo répond aux robots
@@ -16,7 +21,8 @@ from urllib.parse import urlsplit
 import httpx
 from pydantic import BaseModel, ValidationError
 
-from .extractors import SourceExtractor
+from .extractors import ExtractionError, SeriesLink, SourceExtractor, UnsupportedDiscoveryError
+from .fetching import FetchError
 
 BRAVE_API_URL = "https://api.search.brave.com/res/v1/"
 USER_AGENT = "manhwa-scraper (+tracker personnel)"
@@ -150,13 +156,49 @@ def dork_query(extractor: type[SourceExtractor], title: str) -> str:
     return f'site:{host} "{phrase}"'
 
 
+def _normalized(title: str) -> str:
+    return " ".join(title.casefold().split())
+
+
+def best_match(extractor: type[SourceExtractor], candidates: list[SeriesLink], title: str) -> str | None:
+    """URL canonique de la fiche retenue : titre identique (casse et espaces ignorés) d'abord, sinon la première.
+
+    Les candidats qui ne sont pas des fiches de `extractor` (accueil, autre site, page de catalogue) sont écartés.
+    Un titre identique passe devant : « Solo Leveling » ne doit pas tomber sur « Solo Leveling : Ragnarok ».
+    """
+    wanted = _normalized(title)
+    pages = [(link.title, url) for link in candidates if (url := extractor.series_url(link.url)) is not None]
+    exact = next((url for found, url in pages if _normalized(found) == wanted), None)
+    return exact if exact is not None else next((url for _, url in pages), None)
+
+
 class SeriesFinder:
-    def __init__(self, engine: SearchEngine) -> None:
+    """Trouve la fiche d'une œuvre sur une source : sa recherche native si elle en a une, sinon le dorking.
+
+    `engine` absent (aucun moteur configuré) : seules les sources à recherche native restent cherchables.
+    """
+
+    def __init__(self, engine: SearchEngine | None) -> None:
         self._engine = engine
 
-    async def find(self, extractor: type[SourceExtractor], title: str) -> str | None:
-        """URL canonique de la première fiche de `extractor` parmi les résultats ; `None` si aucune."""
-        for result in await self._engine.search(dork_query(extractor, title), count=MAX_RESULTS):
-            if (url := extractor.series_url(result.url)) is not None:
-                return url
-        return None
+    async def find(self, extractor: SourceExtractor, title: str) -> str | None:
+        """URL canonique de la fiche ; `None` si aucune. `SearchError` si la recherche est impossible ou en panne."""
+        if not _normalized(title.replace('"', " ")):
+            raise ValueError("Titre vide")
+        try:
+            candidates = await extractor.search_series(title)
+        except UnsupportedDiscoveryError:
+            candidates = await self._dork(type(extractor), title)
+        except (FetchError, ExtractionError) as error:
+            # Pas de repli sur le dorking : la source a parlé (ou bloque), le moteur tiers n'en saurait pas plus.
+            raise SearchError(f"Recherche native {extractor.slug} en échec : {error}") from error
+        return best_match(type(extractor), candidates, title)
+
+    async def _dork(self, extractor: type[SourceExtractor], title: str) -> list[SeriesLink]:
+        if self._engine is None:
+            raise SearchError(
+                f"« {extractor.slug} » n'a pas de recherche native et aucun moteur n'est configuré "
+                "(définir SEARXNG_URL, ex. http://localhost:8080)"
+            )
+        results = await self._engine.search(dork_query(extractor, title), count=MAX_RESULTS)
+        return [SeriesLink(title=result.title, url=result.url) for result in results]

@@ -1,14 +1,16 @@
-"""Dorking : SearXNG et Brave sont simulés par `httpx.MockTransport`, aucun appel réel ni quota consommé."""
+"""Recherche : SearXNG et Brave simulés par `httpx.MockTransport`, le site par `FakeFetcher` (aucun appel réel)."""
 
 import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
+from typing import ClassVar
 
 import httpx
 import pytest
 
 from manhwa_scraper.extractors.sites.mangas_origines import MangasOriginesExtractor
 from manhwa_scraper.extractors.sites.scan_manga import ScanMangaExtractor
+from manhwa_scraper.extractors.themes import MadaraExtractor
 from manhwa_scraper.search import (
     BraveSearchEngine,
     SearchError,
@@ -19,6 +21,8 @@ from manhwa_scraper.search import (
     create_searxng_client,
     dork_query,
 )
+
+from .fakes import FakeFetcher, blocked
 
 KEY = "brave-test-key"
 
@@ -234,30 +238,134 @@ class TestDorkQuery:
             dork_query(ScanMangaExtractor, ' " ')
 
 
-class TestSeriesFinder:
+class DorkOnly(MadaraExtractor):
+    """Source Madara sans recherche native : `SeriesFinder` doit passer par le moteur."""
+
+    slug: ClassVar[str] = "dork-only"
+    name: ClassVar[str] = "Sans recherche"
+    base_url: ClassVar[str] = "https://scan.test/"
+
+
+ORIGINES_AJAX = "https://mangas-origines.fr/wp-admin/admin-ajax.php"
+
+
+def origines(body: str | None = None) -> tuple[MangasOriginesExtractor, FakeFetcher]:
+    fetcher = FakeFetcher()
+    if body is not None:
+        fetcher.add(ORIGINES_AJAX, body, method="POST")
+    return MangasOriginesExtractor(fetcher), fetcher
+
+
+def ajax_hits(*hits: tuple[str, str]) -> str:
+    return json.dumps({"success": True, "data": [{"title": title, "url": url} for title, url in hits]})
+
+
+class TestSeriesFinderDorking:
     async def test_returns_the_first_series_page_of_the_source(self) -> None:
         engine = FakeSearchEngine(
             [
                 SearchResult("Autre site", "https://ailleurs.test/manga/solo/"),
                 SearchResult("Accueil", "https://www.scan-manga.com/"),
-                SearchResult("Solo Leveling", "https://scan-manga.com/1805-54398/Solo-Leveling.html"),
+                SearchResult("Solo Leveling - Scan Manga", "https://scan-manga.com/1805-54398/Solo-Leveling.html"),
                 SearchResult("Doublon", "https://www.scan-manga.com/9/Autre.html"),
             ]
         )
 
-        url = await SeriesFinder(engine).find(ScanMangaExtractor, "Solo Leveling")
+        url = await SeriesFinder(engine).find(ScanMangaExtractor(FakeFetcher()), "Solo Leveling")
 
         assert url == "https://www.scan-manga.com/1805-54398/Solo-Leveling.html"
         assert engine.queries == ['site:scan-manga.com "Solo Leveling"']
 
     async def test_a_chapter_result_leads_back_to_its_series(self) -> None:
-        engine = FakeSearchEngine([SearchResult("Ch. 12", "https://mangas-origines.fr/oeuvre/solo/chapitre-12/")])
+        engine = FakeSearchEngine([SearchResult("Ch. 12", "https://scan.test/manga/solo/chapitre-12/")])
 
-        assert await SeriesFinder(engine).find(MangasOriginesExtractor, "Solo") == (
-            "https://mangas-origines.fr/oeuvre/solo/"
-        )
+        assert await SeriesFinder(engine).find(DorkOnly(FakeFetcher()), "Solo") == "https://scan.test/manga/solo/"
 
     async def test_none_when_nothing_matches(self) -> None:
-        engine = FakeSearchEngine([SearchResult("Catalogue", "https://mangas-origines.fr/oeuvre/page/2/")])
+        engine = FakeSearchEngine([SearchResult("Catalogue", "https://scan.test/manga/page/2/")])
 
-        assert await SeriesFinder(engine).find(MangasOriginesExtractor, "Introuvable") is None
+        assert await SeriesFinder(engine).find(DorkOnly(FakeFetcher()), "Introuvable") is None
+
+    async def test_without_engine_a_source_without_native_search_cannot_be_searched(self) -> None:
+        with pytest.raises(SearchError, match="SEARXNG_URL"):
+            await SeriesFinder(None).find(DorkOnly(FakeFetcher()), "Solo")
+
+    async def test_rejects_an_empty_title_before_any_request(self) -> None:
+        engine = FakeSearchEngine([])
+
+        with pytest.raises(ValueError, match="vide"):
+            await SeriesFinder(engine).find(DorkOnly(FakeFetcher()), ' " ')
+        assert engine.queries == []
+
+
+class TestSeriesFinderNativeSearch:
+    async def test_is_used_first_and_the_engine_is_never_called(self) -> None:
+        engine = FakeSearchEngine([SearchResult("Autre", "https://mangas-origines.fr/oeuvre/mauvaise-piste/")])
+        extractor, fetcher = origines(ajax_hits(("Necromancer", "https://mangas-origines.fr/oeuvre/necromancer/")))
+
+        url = await SeriesFinder(engine).find(extractor, "Necromancer")
+
+        assert url == "https://mangas-origines.fr/oeuvre/necromancer/"
+        assert engine.queries == []
+        (call,) = fetcher.calls
+        assert (call.method, call.url) == ("POST", ORIGINES_AJAX)
+        assert call.data == {"action": "madara_child_search", "term": "Necromancer"}
+
+    async def test_works_without_any_engine_configured(self) -> None:
+        extractor, _ = origines(ajax_hits(("Necromancer", "https://mangas-origines.fr/oeuvre/necromancer/")))
+
+        assert await SeriesFinder(None).find(extractor, "Necromancer") == (
+            "https://mangas-origines.fr/oeuvre/necromancer/"
+        )
+
+    async def test_prefers_the_exact_title_over_the_first_spin_off(self) -> None:
+        # Ordre réel du site pour « solo leveling » (relevé du 2026-10-09) : les dérivés passent devant.
+        extractor, _ = origines(
+            ajax_hits(
+                ("Solo Leveling Arise : Hunters Origins", "https://mangas-origines.fr/oeuvre/solo-leveling-arise/"),
+                ("Solo Leveling : Ragnarok", "https://mangas-origines.fr/oeuvre/solo-leveling-ragnarok/"),
+                ("Solo  Leveling", "https://mangas-origines.fr/oeuvre/solo-leveling/"),
+            )
+        )
+
+        assert await SeriesFinder(None).find(extractor, "solo leveling") == (
+            "https://mangas-origines.fr/oeuvre/solo-leveling/"
+        )
+
+    async def test_falls_back_to_the_first_series_page_without_an_exact_title(self) -> None:
+        extractor, _ = origines(
+            ajax_hits(
+                ("Lien mort", "https://ailleurs.test/oeuvre/x/"),
+                ("Solo Leveling : Ragnarok", "https://mangas-origines.fr/oeuvre/solo-leveling-ragnarok/"),
+            )
+        )
+
+        assert await SeriesFinder(None).find(extractor, "Solo Leveling Ragnarok") == (
+            "https://mangas-origines.fr/oeuvre/solo-leveling-ragnarok/"
+        )
+
+    async def test_no_result_is_final_without_asking_the_engine(self) -> None:
+        engine = FakeSearchEngine([SearchResult("X", "https://mangas-origines.fr/oeuvre/x/")])
+        extractor, _ = origines(json.dumps({"success": True, "data": []}))
+
+        assert await SeriesFinder(engine).find(extractor, "Introuvable") is None
+        assert engine.queries == []
+
+    async def test_a_site_failure_is_a_search_error(self) -> None:
+        extractor, _ = origines()  # aucune réponse enregistrée : le faux site répond 404
+
+        with pytest.raises(SearchError, match="mangas-origines"):
+            await SeriesFinder(None).find(extractor, "Solo")
+
+    async def test_an_anti_bot_block_is_a_search_error(self) -> None:
+        extractor, fetcher = origines()
+        fetcher.add(ORIGINES_AJAX, blocked(ORIGINES_AJAX), method="POST")
+
+        with pytest.raises(SearchError, match="Bloqué"):
+            await SeriesFinder(None).find(extractor, "Solo")
+
+    async def test_an_unreadable_answer_is_a_search_error(self) -> None:
+        extractor, _ = origines("<html>maintenance</html>")
+
+        with pytest.raises(SearchError, match="inattendue"):
+            await SeriesFinder(None).find(extractor, "Solo")

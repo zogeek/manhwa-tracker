@@ -117,7 +117,8 @@ class RobotsGuardedFetcher:
         *,
         method: HttpMethod = "GET",
         headers: Mapping[str, str] | None = None,
+        data: Mapping[str, str] | None = None,
     ) -> FetchResult:
         if not await self._policy.allowed(url):
             raise DisallowedByRobotsError(url)
-        return await self._inner.fetch(url, method=method, headers=headers)
+        return await self._inner.fetch(url, method=method, headers=headers, data=data)

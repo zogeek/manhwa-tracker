@@ -13,7 +13,7 @@ from typing import Self
 from curl_cffi.requests import AsyncSession, BrowserTypeLiteral, Response
 from curl_cffi.requests.exceptions import RequestException
 
-from .base import BlockedByAntiBotError, FetchError, FetchResult, HttpMethod, detect_challenge
+from .base import BlockedByAntiBotError, FetchError, FetchResult, HttpMethod, detect_challenge, form_body
 
 
 class CurlCffiFetcher:
@@ -41,10 +41,12 @@ class CurlCffiFetcher:
         *,
         method: HttpMethod = "GET",
         headers: Mapping[str, str] | None = None,
+        data: Mapping[str, str] | None = None,
     ) -> FetchResult:
+        request_headers, body = form_body(headers, data)
         started = time.perf_counter()
         try:
-            response = await self._session.request(method, url, headers=dict(headers or {}))
+            response = await self._session.request(method, url, headers=request_headers, data=body)
         except RequestException as error:
             raise FetchError(f"{method} {url} : {error}", url=url) from error
         latency_ms = round((time.perf_counter() - started) * 1000)

@@ -1,14 +1,16 @@
 """Premier extracteur « prêt » : fiche, chapitres et catalogue sur des fixtures synthétiques reproduisant le thème."""
 
+import json
 from datetime import datetime
 
 import pytest
 from selectolax.lexbor import LexborHTMLParser
 
 from manhwa_scraper.contract import ManhwaStatus, ManhwaType
+from manhwa_scraper.extractors import ExtractionError, SeriesLink
 from manhwa_scraper.extractors.parsing import PARIS
 from manhwa_scraper.extractors.sites import default_registry
-from manhwa_scraper.extractors.sites.mangas_origines import MangasOriginesExtractor
+from manhwa_scraper.extractors.sites.mangas_origines import MangasOriginesExtractor, parse_search_response
 from manhwa_scraper.fetching import FetchError, RobotsGuardedFetcher, RobotsPolicy
 
 from .fakes import FakeFetcher, fixture
@@ -18,6 +20,7 @@ CATALOG = "https://mangas-origines.fr/oeuvre/"
 CATALOG_2 = "https://mangas-origines.fr/oeuvre/page/2/"
 ROBOTS = "https://mangas-origines.fr/robots.txt"
 ORDERED = "https://mangas-origines.fr/oeuvre/?m_orderby=latest"
+AJAX = "https://mangas-origines.fr/wp-admin/admin-ajax.php"
 
 
 def test_is_ready_and_runnable_from_the_cli() -> None:
@@ -86,6 +89,60 @@ async def test_the_series_and_admin_ajax_stay_allowed() -> None:
     policy = RobotsPolicy(fetcher)
 
     assert await policy.allowed(SERIES)
-    assert await policy.allowed("https://mangas-origines.fr/wp-admin/admin-ajax.php")
+    assert await policy.allowed(AJAX)
     assert not await policy.allowed(ORDERED)
     assert not await policy.allowed("https://mangas-origines.fr/?s=solo")
+
+
+class TestNativeSearch:
+    async def test_posts_the_child_theme_search_form_to_admin_ajax(self) -> None:
+        fetcher = FakeFetcher()
+        fetcher.add(AJAX, json.dumps({"success": True, "data": []}), method="POST")
+
+        assert await MangasOriginesExtractor(fetcher).search_series("Lame d'ombre") == []
+
+        (call,) = fetcher.calls
+        assert (call.method, call.url) == ("POST", AJAX)
+        assert call.data == {"action": "madara_child_search", "term": "Lame d'ombre"}
+        assert call.headers is not None
+        assert call.headers["Content-Type"] == "application/x-www-form-urlencoded"
+        assert call.headers["X-Requested-With"] == "XMLHttpRequest"
+
+    def test_reads_title_and_url_in_site_order_and_decodes_entities(self) -> None:
+        body = json.dumps(
+            {
+                "success": True,
+                "data": [
+                    {
+                        "title": "L&#8217;ascension",
+                        "url": "https://mangas-origines.fr/oeuvre/l-ascension/",
+                        "thumb": "https://mangas-origines.fr/wp-content/uploads/a-150x150.png",
+                        "genres": "Action · Aventure",
+                        "rating": "4.3",
+                    },
+                    {"title": "Lame d'ombre", "url": SERIES},
+                ],
+            }
+        )
+
+        assert parse_search_response(body) == [
+            SeriesLink(title="L’ascension", url="https://mangas-origines.fr/oeuvre/l-ascension/"),
+            SeriesLink(title="Lame d'ombre", url=SERIES),
+        ]
+
+    def test_a_refusal_means_no_result(self) -> None:
+        body = json.dumps({"success": False, "data": [{"error": "not found", "message": "No Posts Found"}]})
+
+        assert parse_search_response(body) == []
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            "<html>maintenance</html>",
+            '{"data": []}',
+            '{"success": true, "data": [{"title": "sans url"}]}',
+        ],
+    )
+    def test_an_unexpected_answer_is_an_extraction_error(self, body: str) -> None:
+        with pytest.raises(ExtractionError, match="inattendue"):
+            parse_search_response(body)

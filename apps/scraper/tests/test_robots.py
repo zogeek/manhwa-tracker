@@ -152,6 +152,16 @@ class TestGuard:
 
         assert [call.url for call in fetcher.calls] == [ROBOTS]
 
+    async def test_an_allowed_form_post_keeps_its_body(self) -> None:
+        fetcher = FakeFetcher()
+        fetcher.add(ROBOTS, "User-agent: *\nDisallow: /wp-admin/\nAllow: /wp-admin/admin-ajax.php\n")
+        ajax = "https://scan.test/wp-admin/admin-ajax.php"
+        fetcher.add(ajax, "{}", method="POST")
+
+        await RobotsGuardedFetcher(fetcher, RobotsPolicy(fetcher)).fetch(ajax, method="POST", data={"term": "solo"})
+
+        assert fetcher.calls[-1].data == {"term": "solo"}
+
     async def test_an_allowed_url_goes_through_with_its_method_and_headers(self) -> None:
         fetcher = FakeFetcher()
         fetcher.add(ROBOTS, "User-agent: *\nDisallow: /wp-admin/\n")

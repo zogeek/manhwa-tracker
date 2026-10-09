@@ -75,6 +75,15 @@ class SourceExtractor(ABC):
         """
         return None
 
+    async def search_series(self, title: str) -> list[SeriesLink]:
+        """Recherche native du site (son propre moteur interne), résultats dans l'ordre du site.
+
+        Point d'extension : une source qui en possède une la surcharge, et `SeriesFinder` l'utilise alors
+        à la place du dorking. Par défaut la source n'en a pas : `UnsupportedDiscoveryError`.
+        Lève `FetchError` si le site ne répond pas, `ExtractionError` si la réponse est illisible.
+        """
+        raise UnsupportedDiscoveryError(f"La source « {self.slug} » n'a pas de recherche native")
+
     # ---- Déroulé (template method) ----
 
     async def discover(self) -> AsyncIterator[str]:

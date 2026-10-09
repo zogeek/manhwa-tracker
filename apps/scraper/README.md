@@ -23,7 +23,7 @@ d'AniList. Il sert au « dernier kilomètre » francophone : savoir **où** lire
 | Dernières sorties | `run <slug> --source-id …` | 1 page de listing + 1 par fiche | suivi des nouveautés, lancé souvent |
 | Top du site | `run <slug> --source-id … --discovery top` | 1 page (le Top) + 1 par fiche | suggestions : ce que lit la communauté |
 | URL directe | `track --source-id … <url> [<url>…]` ou `--urls-file suivies.txt` | 1 par fiche, aucun catalogue | séries suivies par les utilisateurs |
-| Suivi depuis l'API | `track --source-id … --from-api <slug>` | 1 par fiche (+ 1 recherche par URL manquante, chez le moteur) | toutes les séries suivies, sans liste à tenir |
+| Suivi depuis l'API | `track --source-id … --from-api <slug>` | 1 par fiche (+ 1 recherche par URL manquante : sur le site s'il a une recherche native, sinon chez le moteur) | toutes les séries suivies, sans liste à tenir |
 
 En mode `track`, la source est déduite du domaine de chaque URL (toutes doivent appartenir à la même source, car un
 run est rattaché à une ligne de `sources`). Le fichier contient une URL par ligne ; lignes vides et `#` ignorées.
@@ -33,18 +33,27 @@ En mode `track`, un lien de chapitre est ramené à sa fiche (`SourceExtractor.s
 
 **`track --from-api <slug>`** lit `GET /api/ingest/tracked` (clé de service, curseur suivi jusqu'à la dernière page) :
 une série est suivie dès qu'elle est dans une liste de lecture active ou qu'un utilisateur a une progression dessus.
-Les séries dont l'URL est connue sur la source sont scrapées d'abord ; pour les autres, l'URL est cherchée par
-dorking (`search`, ci-dessous) puis la page est rattachée à l'œuvre de l'API (`manhwaId`) : le lien source ↔ œuvre
-est créé, sans fiche en double. Sans moteur configuré, ou s'il tombe en panne, seules les URLs connues sont scrapées ;
-une page trouvée qui appartient déjà à une autre œuvre suivie est écartée. Une liste de suivi vide n'est pas un échec.
+Les séries dont l'URL est connue sur la source sont scrapées d'abord ; pour les autres, l'URL est cherchée
+(`search`, ci-dessous) puis la page est rattachée à l'œuvre de l'API (`manhwaId`) : le lien source ↔ œuvre est créé,
+sans fiche en double. Si la recherche est impossible (ni recherche native ni moteur) ou tombe en panne, elle est
+désactivée pour le run et seules les URLs connues sont scrapées ; une page trouvée qui appartient déjà à une autre
+œuvre suivie est écartée. Une liste de suivi vide n'est pas un échec.
 
-**Recherche sur le site : non disponible.** Aucune source prête ne l'autorise : scan-manga la sert uniquement aux
-navigateurs (refus ciblé, voir « Ligne rouge ») et le `robots.txt` de mangas-origines interdit `/?s=`.
+**Trouver une fiche par son titre : `search`.** `SeriesFinder` choisit la méthode selon la source :
 
-**Recherche par dorking : `search`.** Pour trouver l'URL d'une fiche à partir de son titre, on interroge un moteur
-tiers avec `site:scan-manga.com "Le Royaume"` : le site cible ne reçoit aucune requête. On garde le premier résultat
-que l'extracteur reconnaît comme une fiche. Une recherche par œuvre suffit : l'URL est ensuite stockée côté API et
-partagée par tous les utilisateurs.
+1. **Recherche native, prioritaire.** Si l'extracteur surcharge `SourceExtractor.search_series`, on interroge le
+   moteur interne du site et le moteur tiers n'est jamais appelé (même sans résultat). Aujourd'hui : mangas-origines,
+   via son API AJAX (`POST /wp-admin/admin-ajax.php`, `action=madara_child_search&term=…`, réponse JSON). Son
+   `robots.txt` interdit `/wp-admin/` mais **autorise explicitement** `/wp-admin/admin-ajax.php` ; la page de
+   recherche `/?s=`, elle, reste interdite et n'est pas utilisée. Une seule requête par œuvre, soumise au même
+   débit limité que le scraping.
+2. **Dorking, en repli.** Pour les autres sources, on interroge un moteur tiers avec `site:scan-manga.com "Le Royaume"` :
+   le site cible ne reçoit aucune requête. scan-manga n'a pas de recherche native exploitable : il la sert uniquement
+   aux navigateurs (refus ciblé, voir « Ligne rouge »).
+
+Dans les deux cas, seuls les résultats que l'extracteur reconnaît comme une fiche sont gardés ; un titre identique
+(casse et espaces ignorés) passe devant le premier résultat (« Solo Leveling » plutôt que « Solo Leveling :
+Ragnarok »). Une recherche par œuvre suffit : l'URL est ensuite stockée côté API et partagée par tous les utilisateurs.
 
 Moteur : une instance **SearXNG auto-hébergée** (`SEARXNG_URL`), sans compte chez un tiers. L'API Brave Search
 reste codée en repli, inactive tant que `SEARXNG_URL` est défini (et sans `BRAVE_SEARCH_API_KEY`). Instance locale :
@@ -61,7 +70,8 @@ services:
 ```
 
 ```sh
-uv run manhwa-scraper search scan-manga "Le Royaume"
+uv run manhwa-scraper search scan-manga "Le Royaume"         # dorking : SEARXNG_URL requis
+uv run manhwa-scraper search mangas-origines "Solo Leveling"  # recherche native : aucun moteur requis
 uv run manhwa-scraper track --source-id <uuid> "$(uv run manhwa-scraper search scan-manga 'Le Royaume')"
 ```
 
@@ -70,7 +80,7 @@ uv run manhwa-scraper track --source-id <uuid> "$(uv run manhwa-scraper search s
 | `dev` | `manhwa-scraper` : liste les sources (`sources`) ; `run <slug>` lance un scraping ; `track <url>…` scrape des fiches précises (`track --from-api <slug>` : les séries suivies) ; `search <slug> "<titre>"` trouve une fiche |
 | `lint` / `format` | Ruff (lint + formatage) |
 | `typecheck` | mypy `--strict` (plugin Pydantic) |
-| `test` | pytest — aucun réseau, aucun navigateur (fakes + fixtures HTML synthétiques ; SearXNG et Brave simulés par `httpx.MockTransport`) |
+| `test` | pytest — aucun réseau, aucun navigateur (fakes + fixtures HTML synthétiques ; SearXNG et Brave simulés par `httpx.MockTransport`, recherches AJAX par le faux fetcher) |
 | `contract:generate` | Régénère `contract.py` depuis le JSON Schema de l'API (datamodel-codegen) |
 
 ## Contrat avec l'API : source unique de vérité
@@ -176,7 +186,7 @@ src/manhwa_scraper/
 ├── models.py              réponses de l'API + sérialisation camelCase
 ├── ingest_client.py       client HTTP de l'API (clé de service, ré-essais, idempotence)
 ├── pipeline.py            ScrapeRunner : cibles (catalogue, Top ou URLs) → fiches → lots, scrape_runs + source_health
-├── search.py              dorking : SearchEngine (protocole), SearxngSearchEngine, BraveSearchEngine (repli), SeriesFinder
+├── search.py              SeriesFinder (recherche native, sinon dorking) ; SearchEngine, SearxngSearchEngine, BraveSearchEngine
 ├── fetching/
 │   ├── base.py            PageFetcher (protocole), FetchResult, détection des challenges
 │   ├── http.py            CurlCffiFetcher   (étage rapide)
@@ -194,8 +204,9 @@ src/manhwa_scraper/
 
 1. Identifier le CMS (`wp-content/themes/madara` → `MadaraExtractor`, `mangareader`/`themesia` → `MangaThemesiaExtractor`, sinon `SourceExtractor`).
 2. Créer `extractors/sites/<site>.py` : `slug`, `name`, `base_url`, et au besoin `series_path` / `selectors`. Un thème enfant Madara se décrit souvent par la seule configuration (`chapter_number_attr`, `chapter_date_attr`…) ; `parse_info_table` se surcharge si le bloc « Statut / Type » est différent (exemple : `mangas_origines.py`).
-3. L'ajouter à `ALL_SOURCES` (`extractors/sites/__init__.py`).
-4. Écrire un test sur une fixture HTML **synthétique** (reproduire la structure, pas le contenu du site), puis passer `ready = True`.
+3. Si le site a une recherche que son `robots.txt` autorise, surcharger `search_series` (exemple : `mangas_origines.py`) : `SeriesFinder` la préférera au dorking.
+4. L'ajouter à `ALL_SOURCES` (`extractors/sites/__init__.py`).
+5. Écrire un test sur une fixture HTML **synthétique** (reproduire la structure, pas le contenu du site), puis passer `ready = True`.
 
 ### État des sources (relevé du 2026-09-27)
 
@@ -205,3 +216,16 @@ src/manhwa_scraper/
 | scan-manga.com | PHP propriétaire | Cloudflare (bot management) | HTTP (curl_cffi) | ✅ **prêt** : découverte par l'accueil (~100 dernières sorties, ou Top découvertes BD ~85 œuvres ; le catalogue complet et la recherche sont réservés aux navigateurs), romans écartés, tomes licenciés ignorés |
 | rimuscan.fr | Next.js | Cloudflare (sans challenge) | HTTP | squelette |
 | astral-manga.fr | Next.js | Cloudflare (challenge JS) | Navigateur (Camoufox) | squelette |
+
+## Roadmap / Futures améliorations
+
+- **Sitemaps XML comme méthode de découverte et de recherche.** Beaucoup de sites WordPress publient un index
+  (`/sitemap_index.xml`, déclaré dans `robots.txt` : c'est le cas de mangas-origines.fr) qui liste toutes les fiches
+  avec leur date de dernière modification (`<lastmod>`). Pistes :
+  - *découverte* : ne retélécharger que les fiches dont `<lastmod>` a changé depuis le dernier run, au lieu de
+    parcourir le catalogue page par page ;
+  - *recherche* : retrouver une fiche par son slug dans le sitemap mis en cache, sans moteur tiers ni requête de
+    recherche au site, pour les sources sans recherche native.
+
+  Conditions : sitemap **public** et déclaré ou autorisé par `robots.txt`. Un sitemap refusé aux clients
+  automatisés (scan-manga : 403 hors moteurs de recherche) relève de la « Ligne rouge » et reste exclu.
