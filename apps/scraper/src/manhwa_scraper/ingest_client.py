@@ -3,19 +3,30 @@
 Robustesse : les erreurs passagères (réseau, 429, 5xx) sont ré-essayées avec un recul exponentiel,
 mais seulement quand c'est sans danger :
 - lots (`Idempotency-Key`) et clôture de run (PATCH) : rejouables tels quels, l'API ne double rien ;
+- lectures (GET) : sans effet de bord, toujours rejouables ;
 - ouverture de run et santé (POST sans clé) : ré-essayés seulement si la requête n'est jamais partie
   (échec de connexion), sinon on risquerait de créer deux runs.
 """
 
 import asyncio
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from uuid import UUID
 
 import httpx
 from tenacity import AsyncRetrying, retry_if_exception, stop_after_attempt, wait_random_exponential
 
-from .contract import FinishRun, HealthSample, IngestBatch, RecordHealth, RunOutcome, StartRun
+from .contract import (
+    FinishRun,
+    HealthSample,
+    IngestBatch,
+    RecordHealth,
+    RunOutcome,
+    StartRun,
+    TrackedSeries,
+    TrackedSeriesPage,
+    TrackedSeriesQuery,
+)
 from .models import BatchResult, HealthResult, ResponseModel, ScrapeRun, to_payload
 
 INGEST_PREFIX = "/api/ingest"
@@ -107,6 +118,23 @@ class IngestClient:
         body = RecordHealth(samples=samples)
         return await self._send("POST", "/health", to_payload(body), HealthResult, idempotent=False)
 
+    async def tracked_series(self, source_id: UUID, *, page_size: int = 100) -> AsyncIterator[TrackedSeries]:
+        """Toutes les œuvres suivies, vues depuis la source, page après page (le curseur est suivi jusqu'au bout).
+
+        Les pages sont demandées au fil de la consommation : une page n'est lue qu'une fois la précédente traitée.
+        """
+        cursor: UUID | None = None
+        while True:
+            query = TrackedSeriesQuery(source_id=source_id, cursor=cursor, limit=page_size)
+            params = {name: str(value) for name, value in to_payload(query).items()}
+            response = await self._request("GET", "/tracked", params=params, idempotent=True)
+            page = TrackedSeriesPage.model_validate_json(response.content)
+            for series in page.data:
+                yield series
+            if page.next_cursor is None:
+                return
+            cursor = page.next_cursor
+
     async def _send[T: ResponseModel](
         self,
         method: str,
@@ -117,6 +145,20 @@ class IngestClient:
         idempotent: bool,
         headers: Mapping[str, str] | None = None,
     ) -> T:
+        response = await self._request(method, path, json=body, idempotent=idempotent, headers=headers)
+        return _parse_data(response, response_model)
+
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        idempotent: bool,
+        json: dict[str, object] | None = None,
+        params: Mapping[str, str] | None = None,
+        headers: Mapping[str, str] | None = None,
+    ) -> httpx.Response:
+        """Requête vers `/api/ingest`, ré-essayée selon `_is_transient`. Lève une `IngestError` si non-2xx."""
         retrying = AsyncRetrying(
             stop=stop_after_attempt(self._retry.max_attempts),
             wait=wait_random_exponential(multiplier=0.5, max=self._retry.max_backoff_s),
@@ -126,10 +168,12 @@ class IngestClient:
         )
         async for attempt in retrying:
             with attempt:
-                response = await self._http.request(method, f"{INGEST_PREFIX}{path}", json=body, headers=headers)
+                response = await self._http.request(
+                    method, f"{INGEST_PREFIX}{path}", json=json, params=params, headers=headers
+                )
                 if response.is_error:
                     raise IngestError(response)
-                return _parse_data(response, response_model)
+                return response
         raise AssertionError("unreachable: tenacity relance l'erreur finale (reraise=True)")
 
 

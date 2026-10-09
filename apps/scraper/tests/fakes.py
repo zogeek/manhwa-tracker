@@ -63,6 +63,8 @@ class FakeIngestApi:
     run_id: str = "5b8f2c1e-0000-4000-8000-000000000001"
     batch_failures: list[int] = field(default_factory=list)
     """Statuts renvoyés (dans l'ordre) par les premiers POST /batches avant de réussir."""
+    tracked: list[dict[str, Any]] = field(default_factory=list)
+    """Séries servies par GET /tracked (JSON du contrat), paginées comme l'API : tri et curseur sur `manhwaId`."""
     requests: list[httpx.Request] = field(default_factory=list)
 
     def transport(self) -> httpx.MockTransport:
@@ -87,9 +89,30 @@ class FakeIngestApi:
                 return httpx.Response(self.batch_failures.pop(0), json={"error": "boom"})
             result = {"manhwas": [], "chaptersCreated": 2, "releasesCreated": 2, "releasesUpdated": 0, "coversAdded": 1}
             return httpx.Response(201, json={"data": result})
+        if (method, path) == ("GET", "/api/ingest/tracked"):
+            return self._tracked_page(request.url.params)
         if (method, path) == ("POST", "/api/ingest/health"):
             return httpx.Response(201, json={"data": {"recorded": len(json.loads(request.content)["samples"])}})
         return httpx.Response(404, json={"error": "Not found"})
+
+    def _tracked_page(self, params: httpx.QueryParams) -> httpx.Response:
+        cursor, limit = params.get("cursor"), int(params.get("limit", "100"))
+        rows = sorted(self.tracked, key=lambda series: str(series["manhwaId"]))
+        after = [series for series in rows if cursor is None or str(series["manhwaId"]) > cursor]
+        data = after[:limit]
+        next_cursor = data[-1]["manhwaId"] if len(after) > limit else None
+        return httpx.Response(200, json={"data": data, "nextCursor": next_cursor})
+
+
+def tracked_series(manhwa_id: str, title: str, manhwa_url: str | None = None) -> dict[str, Any]:
+    """Une ligne de GET /tracked, telle que l'API la renvoie."""
+    return {
+        "manhwaId": manhwa_id,
+        "title": title,
+        "manhwaUrl": manhwa_url,
+        "latestChapter": None,
+        "lastScrapedAt": None,
+    }
 
 
 async def no_sleep(_: float) -> None:
