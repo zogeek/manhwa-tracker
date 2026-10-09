@@ -48,8 +48,8 @@ désactivée pour le run et seules les URLs connues sont scrapées ; une page tr
    recherche `/?s=`, elle, reste interdite et n'est pas utilisée. Une seule requête par œuvre, soumise au même
    débit limité que le scraping.
 2. **Dorking, en repli.** Pour les autres sources, on interroge un moteur tiers avec `site:scan-manga.com "Le Royaume"` :
-   le site cible ne reçoit aucune requête. scan-manga n'a pas de recherche native exploitable : il la sert uniquement
-   aux navigateurs (refus ciblé, voir « Ligne rouge »).
+   le site cible ne reçoit aucune requête. scan-manga n'a pas de recherche native exploitable : `qsearch.json` comme
+   `bqj.scan-manga.com/search/quick.json` ne répondent qu'aux navigateurs (refus ciblé, voir « Ligne rouge »).
 
 Dans les deux cas, seuls les résultats que l'extracteur reconnaît comme une fiche sont gardés ; un titre identique
 (casse et espaces ignorés) passe devant le premier résultat (« Solo Leveling » plutôt que « Solo Leveling :
@@ -146,6 +146,10 @@ scan-manga.com :
   aux en-têtes identiques, derrière un code JavaScript obfusqué ;
 - la recherche : `liste_series.html?q=…` est remplie depuis ce même `scan.data.json`, et les suggestions
   `qsearch.json` (pourtant publiées dans `osd.xml`) répondent elles aussi 200 au corps **vide** à un client HTTP ;
+- la recherche rapide `bqj.scan-manga.com/search/quick.json?term=…` (relevé du 2026-10-09) : 200 au corps **vide**
+  (0 octet) pour curl_cffi, avec ou sans en-têtes AJAX, titre connu ou non ; le `robots.txt` de `bqj` répond 403.
+  Seul un navigateur exécutant le JavaScript anti-bot reçoit les résultats : forcer le passage par Camoufox serait
+  un contournement, donc scan-manga reste sur le dorking (SearXNG) et l'URL collée à la main ;
 - plus généralement : pas de désobfuscation de code, pas de jeton rejoué, pas de compte ni de paywall contourné.
 
 Même règle pour les services tiers. Recherche par « dorking » (`site:scan-manga.com "Titre"`) sur DuckDuckGo,
@@ -174,6 +178,29 @@ et on peut toujours demander l'autorisation à ses administrateurs.
 | Parsing HTML | **selectolax** (Lexbor) | Sélecteurs CSS, parseur en C bien plus rapide que BeautifulSoup. |
 | Validation | **Pydantic v2** (+ pydantic-settings) | Modèles **générés** depuis le contrat Zod de l'API (datamodel-codegen) : un champ faux échoue côté worker, avec un message lisible, avant l'envoi. |
 | Client API | **httpx** + **tenacity** | Async, timeouts, transport mockable en test ; ré-essais exponentiels uniquement quand rejouer est sans danger (lots idempotents). |
+
+### Pourquoi pas Scrapy ? (décision du 2026-10-09)
+
+Une migration vers Scrapy a été étudiée puis **refusée**. Scrapy est un excellent moteur de **moissonnage en masse**
+(ordonnanceur, des centaines de requêtes en parallèle, pipelines d'export). Notre besoin est presque l'inverse :
+peu de requêtes (une par fiche, au plus une toutes les 1,5 s par site) mais **chacune doit passer** des protections
+anti-bot agressives (Cloudflare bot management, WAF qui filtrent sur la poignée de main TLS).
+
+| Critère | Stack actuelle | Scrapy |
+|---|---|---|
+| Empreinte réseau | curl_cffi rejoue Chrome sur toutes les couches (TLS JA3/JA4, HTTP/2, en-têtes) : c'est ce qui fait passer scan-manga.com. | Téléchargeur Twisted : empreinte TLS de Python, rejetée par ces WAF. Il faut greffer curl_cffi ou Playwright par des plugins tiers (`scrapy-impersonate`, `scrapy-playwright`), qui contournent justement son téléchargeur. |
+| Escalade HTTP → navigateur | `TieredFetcher` : HTTP d'abord, Camoufox seulement sur challenge détecté, choix **mémorisé par site** pour le reste du run. | Pas natif : un middleware maison, couplé au cycle de vie Twisted/asyncio de Scrapy. |
+| Modèle d'exécution | `asyncio` pur, comme httpx et Playwright : un seul modèle de concurrence. | Réacteur Twisted (pont asyncio possible, mais une couche de plus à déboguer). |
+| Tests et injection de dépendances | Les extracteurs ne voient que le protocole `PageFetcher` : un faux fetcher suffit, sans réseau (cf. `tests/fakes.py`). | Les « spiders » sont pilotés par le moteur : les tester demande de simuler ses objets `Request`/`Response`. |
+| Ce qu'on reprendrait de Scrapy | Son parseur `robots.txt` (**Protego**) est déjà utilisé, seul. | — |
+
+Concrètement, Scrapy imposerait un cadre rigide et en grande partie inutile ici (débit, export), alors que la valeur du
+worker tient dans un contrôle fin de **chaque** requête : empreinte, étage, débit, arrêt au premier blocage.
+
+Cette « furtivité » sert à passer les filtres **génériques**, jamais un refus ciblé (voir « Ligne rouge »). Le
+framework n'y change rien : avec Scrapy, la recherche de scan-manga resterait tout autant hors limites.
+
+À rouvrir si le besoin change de nature : crawl de milliers de pages par run, sur des sites sans protection anti-bot.
 
 ## Architecture
 
