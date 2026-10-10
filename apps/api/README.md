@@ -4,7 +4,7 @@
 
 ```sh
 cp .env.example .env.development   # puis ajuster DATABASE_URL, BETTER_AUTH_SECRET et SCRAPER_API_KEY
-docker compose up -d               # depuis la racine du repo (Postgres sur :5431)
+docker compose -f docker-compose.dev.yml up -d   # depuis la racine du repo (Postgres sur :5431)
 pnpm db:migrate
 pnpm dev                           # http://localhost:3001
 ```

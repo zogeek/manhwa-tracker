@@ -1,0 +1,16 @@
+# SearXNG du worker (dorking `site:…`), joignable uniquement sur le réseau Docker interne : http://searxng:8080.
+# Monté en lecture seule par docker-compose.yml ; les réglages absents reprennent les valeurs par défaut de SearXNG.
+use_default_settings: true
+
+server:
+  # Remplacé au démarrage par la variable SEARXNG_SECRET (docker-compose.yml) : aucun secret dans le dépôt.
+  secret_key: "set-by-SEARXNG_SECRET"
+  # Instance privée, un seul client (le worker) : pas de limiteur anti-abus (il demanderait un Valkey/Redis).
+  limiter: false
+  image_proxy: false
+
+search:
+  # Le worker lit l'API JSON (`/search?format=json`) : sans `json` ici, SearXNG répond 403.
+  formats:
+    - html
+    - json
