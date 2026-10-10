@@ -1,0 +1,30 @@
+# Contexte de build = racine du monorepo (lockfile pnpm partagé) : on n'envoie au démon que le nécessaire.
+**/node_modules
+**/.turbo
+**/dist
+**/.next
+**/coverage
+**/*.tsbuildinfo
+**/*.log
+
+# Secrets et données locales : jamais dans une image.
+**/.env
+**/.env.*
+!**/.env.example
+db-data
+apps/api/storage
+
+# Python : l'environnement est recréé par uv dans l'image.
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+
+# Outillage
+.git
+.github
+.idea
+.vscode
+.claude
+**/.DS_Store

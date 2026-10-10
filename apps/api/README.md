@@ -22,9 +22,17 @@ pnpm dev                           # http://localhost:3001
 | `admin:promote <email>` | Donne le rôle `admin` à un utilisateur existant (bootstrap du premier admin) |
 | `auth:generate` | Régénère `src/shared/db/auth-schema.ts` via le CLI Better Auth (ne jamais l'éditer à la main) |
 | `db:generate` | Génère une migration SQL dans `drizzle/` à partir de `src/shared/db/schema.ts` |
-| `db:migrate` / `db:migrate:prod` | Applique les migrations |
+| `db:migrate` / `db:migrate:prod` | Applique les migrations (drizzle-kit) |
 | `db:push` | Synchronise le schéma sans migration — **dev uniquement** |
 | `db:studio` | Drizzle Studio |
+
+## Image Docker
+
+`Dockerfile` (contexte : racine du monorepo, pour le lockfile pnpm) : build multi-étapes — compilation TypeScript
+avec toutes les dépendances, puis image finale Node seule avec les dépendances de production (`pnpm deploy --prod
+--no-optional`), lancée en utilisateur non root. Au démarrage, `dist/scripts/migrate.js` applique les migrations
+commitées (migrateur `drizzle-orm`, sans drizzle-kit, idempotent) avant de lancer le serveur. Les couvertures miroir
+vivent dans le volume monté sur `/app/storage/media`. Orchestration : `docker-compose.yml` à la racine.
 
 ## Architecture
 
