@@ -1,0 +1,11 @@
+# Contexte de build = apps/scraper : l'environnement Python est recréé par uv dans l'image.
+.venv
+**/__pycache__
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.turbo
+tests
+.env
+.env.*
+!.env.example
