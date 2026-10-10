@@ -55,7 +55,9 @@ manhwa-tracker/
 │   └── scraper/          ← Worker Python (🟡 2 sources prêtes : mangas-origines, scan-manga ; contrat généré depuis Zod)
 ├── packages/             ← Packages partagés (vide)
 ├── CLAUDE.md             ← Règles d'architecture, SOP Git, stratégie de tests
-├── docker-compose.yml    ← PostgreSQL 16 local (port 5431)
+├── docker-compose.yml    ← Stack Docker complète : postgres, searxng, api, scraper (variables : .env.example)
+├── docker-compose.dev.yml← PostgreSQL 16 de développement (port 5431)
+├── infra/searxng/        ← Configuration du SearXNG interne (dorking du worker)
 ├── turbo.json            ← build / typecheck / test / lint
 └── pnpm-workspace.yaml
 ```

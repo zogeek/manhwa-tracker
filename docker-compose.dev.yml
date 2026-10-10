@@ -1,0 +1,15 @@
+# Base de développement locale (pnpm dev, port 5431) : docker compose -f docker-compose.dev.yml up -d
+# Séparée de docker-compose.yml (stack de production), qui exige des secrets dans .env.
+name: manhwa-tracker-dev
+
+services:
+  manhwa-db-dev:
+    image: "postgres:16-alpine"
+    ports:
+      - 5431:5432
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: dev_password
+      POSTGRES_DB: manhwa_dev
+    volumes:
+      - ./db-data/:/var/lib/postgresql/data/

@@ -56,18 +56,10 @@ Dans les deux cas, seuls les résultats que l'extracteur reconnaît comme une fi
 Ragnarok »). Une recherche par œuvre suffit : l'URL est ensuite stockée côté API et partagée par tous les utilisateurs.
 
 Moteur : une instance **SearXNG auto-hébergée** (`SEARXNG_URL`), sans compte chez un tiers. L'API Brave Search
-reste codée en repli, inactive tant que `SEARXNG_URL` est défini (et sans `BRAVE_SEARCH_API_KEY`). Instance locale :
-
-```yaml
-# docker-compose.yml — puis, dans ./searxng/settings.yml : `use_default_settings: true`,
-# `server.secret_key: <openssl rand -hex 32>` et `search.formats: [html, json]` (sinon l'API JSON répond 403).
-services:
-  searxng:
-    image: searxng/searxng:latest
-    ports: ["127.0.0.1:8080:8080"]
-    volumes: ["./searxng:/etc/searxng"]
-    restart: unless-stopped
-```
+reste codée en repli, inactive tant que `SEARXNG_URL` est défini (et sans `BRAVE_SEARCH_API_KEY`). L'instance est
+fournie par la stack Docker (service `searxng`, configuration dans `infra/searxng/settings.yml` : format JSON activé,
+clé secrète lue dans `SEARXNG_SECRET`). En local hors stack, l'exposer sur la boucle locale et pointer `SEARXNG_URL`
+dessus (`http://localhost:8080`).
 
 ```sh
 uv run manhwa-scraper search scan-manga "Le Royaume"         # dorking : SEARXNG_URL requis
@@ -82,6 +74,30 @@ uv run manhwa-scraper track --source-id <uuid> "$(uv run manhwa-scraper search s
 | `typecheck` | mypy `--strict` (plugin Pydantic) |
 | `test` | pytest — aucun réseau, aucun navigateur (fakes + fixtures HTML synthétiques ; SearXNG et Brave simulés par `httpx.MockTransport`, recherches AJAX par le faux fetcher) |
 | `contract:generate` | Régénère `contract.py` depuis le JSON Schema de l'API (datamodel-codegen) |
+
+## Déploiement Docker
+
+`docker compose up -d --build` à la racine (variables : `.env.example` → `.env`) démarre le worker à côté de l'API,
+de Postgres et de SearXNG. L'image (`Dockerfile`) installe les dépendances figées par `uv.lock` (sans les outils de
+dev), les bibliothèques système d'un Firefox headless et le navigateur Camoufox (≈ 2,5 Go, dont 2,1 Go de polices
+servant à imiter Windows, macOS ou Linux : c'est l'essentiel de la taille de l'image).
+
+Le conteneur ne s'éteint pas après un run : `docker/scheduler.sh` lance `track --from-api <slug>` pour chaque source
+de `SCRAPER_TRACK_TARGETS` (`slug=uuid,slug=uuid`, UUID lus sur `GET /sources`), puis attend le cycle suivant.
+
+| Variable | Défaut | Rôle |
+|---|---|---|
+| `SCRAPER_TRACK_TARGETS` | vide | Sources suivies ; vide = aucun run (le worker attend et passe `unhealthy`) |
+| `SCRAPER_SCHEDULE_INTERVAL_S` | `7200` | Un cycle toutes les N secondes, mesurées de début à début (pas de dérive) |
+| `SCRAPER_RUN_TIMEOUT_S` | `3600` | Durée max d'un run : SIGINT, puis SIGKILL 30 s plus tard |
+
+- **Jamais deux runs en même temps** : les sources passent l'une après l'autre ; un cycle plus long que l'intervalle
+  enchaîne sur le suivant au lieu de se superposer (politesse envers les sites préservée).
+- **Un échec n'arrête pas la boucle** : il est journalisé et la source est retentée au cycle suivant.
+- **Arrêt propre** : `docker stop` → le run en cours reçoit SIGINT (Python referme le navigateur) ; `tini` (PID 1)
+  relaie les signaux et ramasse les processus zombies des navigateurs.
+- **Santé** : `docker/healthcheck.sh` vérifie que la boucle a donné signe de vie récemment (fichier heartbeat).
+- Logs : `docker compose logs -f scraper`.
 
 ## Contrat avec l'API : source unique de vérité
 

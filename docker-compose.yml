@@ -1,11 +1,87 @@
+# Stack complète (production) : docker compose up -d --build — variables : copier .env.example en .env.
+# Base de développement seule (pnpm dev) : docker compose -f docker-compose.dev.yml up -d
+name: manhwa-tracker
+
 services:
-  manhwa-db-dev:
-    image: "postgres:16-alpine"
-    ports:
-      - 5431:5432
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: dev_password
-      POSTGRES_DB: manhwa_dev
+      POSTGRES_USER: ${POSTGRES_USER:-manhwa}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?définir POSTGRES_PASSWORD dans .env}
+      POSTGRES_DB: ${POSTGRES_DB:-manhwa}
     volumes:
-      - ./db-data/:/var/lib/postgresql/data/
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # Aucun port publié : seule l'API parle à la base, sur le réseau interne.
+
+  searxng:
+    image: searxng/searxng:2026.10.9-f4822b3fc
+    restart: unless-stopped
+    environment:
+      SEARXNG_SECRET: ${SEARXNG_SECRET:?définir SEARXNG_SECRET dans .env}
+      # settings.yml est monté en lecture seule : l'image n'essaie pas d'en prendre la propriété (chown).
+      FORCE_OWNERSHIP: "false"
+    volumes:
+      - ./infra/searxng/settings.yml:/etc/searxng/settings.yml:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    # Port 8080 interne uniquement (http://searxng:8080) : le moteur ne sert qu'au worker.
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    image: manhwa-tracker/api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-manhwa}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-manhwa}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?définir BETTER_AUTH_SECRET dans .env}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:3000}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      SCRAPER_API_KEY: ${SCRAPER_API_KEY:?définir SCRAPER_API_KEY dans .env}
+      IMAGE_PROXY_ALLOWED_HOSTS: ${IMAGE_PROXY_ALLOWED_HOSTS:-anilist.co,mangadex.org,kitsu.app,kitsu.io}
+    volumes:
+      - api-media:/app/storage/media
+    ports:
+      # Publié sur la boucle locale seulement : un reverse proxy (ou le front Next.js) se place devant.
+      - "127.0.0.1:${API_PORT:-3001}:3001"
+
+  scraper:
+    build:
+      context: apps/scraper
+    image: manhwa-tracker/scraper
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+      searxng:
+        condition: service_healthy
+    environment:
+      SCRAPER_API_URL: http://api:3001
+      SCRAPER_API_KEY: ${SCRAPER_API_KEY:?définir SCRAPER_API_KEY dans .env}
+      SEARXNG_URL: http://searxng:8080
+      SCRAPER_TRACK_TARGETS: ${SCRAPER_TRACK_TARGETS:-}
+      SCRAPER_SCHEDULE_INTERVAL_S: ${SCRAPER_SCHEDULE_INTERVAL_S:-7200}
+      SCRAPER_RUN_TIMEOUT_S: ${SCRAPER_RUN_TIMEOUT_S:-3600}
+      SCRAPER_REQUEST_INTERVAL_S: ${SCRAPER_REQUEST_INTERVAL_S:-1.5}
+      SCRAPER_LOG_LEVEL: ${SCRAPER_LOG_LEVEL:-INFO}
+    # Firefox (Camoufox) utilise /dev/shm : les 64 Mo par défaut de Docker le font planter sur les pages lourdes.
+    shm_size: 1gb
+    # Laisse au run en cours le temps de refermer le navigateur après SIGTERM (scheduler.sh relaie un SIGINT).
+    stop_grace_period: 60s
+
+volumes:
+  postgres-data:
+  api-media:
