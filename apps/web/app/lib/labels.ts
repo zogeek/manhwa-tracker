@@ -1,4 +1,4 @@
-import type { AuthorRole, ManhwaType, PublicationStatus, ReadingStatus } from "./api-types";
+import type { AuthorRole, ExternalProvider, ManhwaType, PublicationStatus, ReadingStatus, SourceHealthStatus } from "./api-types";
 
 // Records exhaustifs : une valeur ajoutée à un enum Postgres casse le typecheck tant qu'elle n'a pas de libellé.
 
@@ -41,3 +41,20 @@ export const AUTHOR_ROLE_LABELS: Record<AuthorRole, string> = {
 
 /** Ordre d'affichage des rôles sur la fiche : auteur complet d'abord. */
 export const AUTHOR_ROLES: readonly AuthorRole[] = ["both", "story", "art"];
+
+export const PROVIDER_LABELS: Record<ExternalProvider, string> = {
+  anilist: "AniList",
+  mangadex: "MangaDex",
+  kitsu: "Kitsu",
+};
+
+/** Ordre d'affichage des catalogues externes (sélecteurs). */
+export const EXTERNAL_PROVIDERS: readonly ExternalProvider[] = ["anilist", "mangadex", "kitsu"];
+
+/** État de la dernière vérification d'une source de scantrad par le scraper. */
+export const SOURCE_STATUS_LABELS: Record<SourceHealthStatus, string> = {
+  up: "Opérationnelle",
+  degraded: "Ralentie",
+  blocked: "Bloquée (anti-bot)",
+  down: "Hors ligne",
+};

@@ -46,3 +46,8 @@ export type AuthorRole = ManhwaAuthor["role"];
 /** Parution d'un chapitre (source, langue, URL) avec les teams créditées, dans l'ordre de crédit. */
 export type ChapterRelease = Chapter["releases"][number];
 export type ReleaseTeam = ChapterRelease["teams"][number];
+
+/** Ligne du tableau de bord (`GET /reading/dashboard`) : entrée de bibliothèque + suivi des parutions. */
+export type TrackedSeries = InferResponseType<typeof api.reading.dashboard.$get, 200>["data"][number];
+export type SeriesTracking = TrackedSeries["tracking"];
+export type SourceHealthStatus = NonNullable<SeriesTracking["sourceStatus"]>;

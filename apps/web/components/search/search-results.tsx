@@ -9,14 +9,9 @@ import { ManhwaGrid } from "@/components/manhwa/manhwa-grid";
 import { api } from "@/app/lib/api";
 import type { ExternalProvider, ProviderReport } from "@/app/lib/api-types";
 import { getLibraryIds } from "@/app/lib/queries";
+import { PROVIDER_LABELS } from "@/app/lib/labels";
 import { ImportButton } from "./import-button";
 import { ROUTES } from "@/app/lib/routes";
-
-export const PROVIDER_LABELS: Record<ExternalProvider, string> = {
-  anilist: "AniList",
-  mangadex: "MangaDex",
-  kitsu: "Kitsu",
-};
 
 type ProviderFailure = { provider: ExternalProvider; status: Exclude<ProviderReport["status"], "ok"> };
 

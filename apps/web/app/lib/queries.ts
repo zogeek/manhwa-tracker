@@ -44,3 +44,10 @@ export const getLibraryIds = cache(async (): Promise<ReadonlySet<string>> => {
   if (!res.ok) return new Set();
   return new Set((await res.json()).data.map((entry) => entry.manhwaId));
 });
+
+/** Tableau de bord : séries suivies + dernier chapitre, santé des sources, date du dernier scraping. */
+export const getDashboard = cache(async () => {
+  const res = await api.reading.dashboard.$get({}, { headers: await getForwardedAuthHeaders() });
+  if (!res.ok) throw new Error(`Tableau de bord indisponible (HTTP ${res.status})`);
+  return (await res.json()).data;
+});
