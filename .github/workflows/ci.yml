@@ -117,3 +117,50 @@ jobs:
             git status --porcelain -- apps/api/drizzle
             exit 1
           fi
+
+  e2e:
+    name: E2E Playwright (web + API + Postgres)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      # Base jetable des parcours E2E : migrée par le webServer « api » de playwright.config.ts.
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: manhwa_e2e
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      E2E_DATABASE_URL: postgres://postgres:postgres@localhost:5432/manhwa_e2e
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browser (Chromium)
+        run: pnpm --filter web exec playwright install --with-deps chromium
+
+      - name: E2E tests
+        run: pnpm --filter web test:e2e
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report
+          retention-days: 7
