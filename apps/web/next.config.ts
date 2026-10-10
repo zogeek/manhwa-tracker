@@ -1,9 +1,10 @@
 import type { NextConfig } from "next";
 import { PUBLIC_API_RESOURCES } from "./app/lib/api-routes";
+import { getApiInternalUrl } from "./app/lib/env";
 import { LEGACY_ROUTES } from "./app/lib/routes";
 
 // URL du backend Hono vue par le serveur Next.js (jamais exposée au navigateur).
-const apiUrl = (process.env.API_INTERNAL_URL ?? "http://localhost:3001").replace(/\/+$/, "");
+const apiUrl = getApiInternalUrl();
 
 const nextConfig: NextConfig = {
   // Anciennes URLs françaises (favoris, liens partagés) : redirection permanente (308), requête conservée.
