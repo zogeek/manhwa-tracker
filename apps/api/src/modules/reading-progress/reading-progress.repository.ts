@@ -1,7 +1,7 @@
-import { and, desc, eq, getTableColumns, isNull, sql } from 'drizzle-orm';
+import { and, count, desc, eq, getTableColumns, inArray, isNull, max, sql } from 'drizzle-orm';
 import type { PgUpdateSetSource } from 'drizzle-orm/pg-core';
 import type { DbClient } from '../../shared/db/index.js';
-import { chapters, manhwas } from '../../shared/db/schema.js';
+import { chapters, manhwas, manhwaSources, sourceHealth, sources } from '../../shared/db/schema.js';
 import { firstOrNull, firstOrThrow } from '../../shared/db/utils.js';
 import { loadManhwaExtras } from '../manhwas/manhwa-extras.js';
 import {
@@ -11,6 +11,9 @@ import {
   type NewChapterRead,
   type ReadingProgress,
   type ReadingProgressWithManhwa,
+  type SeriesTracking,
+  type SourceHealthStatus,
+  type TrackedSeries,
 } from './reading-progress.schema.js';
 import type { UpdateProgressInput } from './reading-progress.validator.js';
 
@@ -25,6 +28,8 @@ export interface ReadingProgressRepository {
   findByUserAndManhwa(userId: string, manhwaId: string): Promise<ReadingProgress | null>;
   /** Bibliothèque de l'utilisateur, manhwas soft-deleted exclus. */
   findAllByUser(userId: string): Promise<ReadingProgressWithManhwa[]>;
+  /** Bibliothèque + suivi des parutions (dernier chapitre, scraping, santé des sources). */
+  findTrackedByUser(userId: string): Promise<TrackedSeries[]>;
   delete(userId: string, manhwaId: string): Promise<ReadingProgress | null>;
   /** Upsert atomique (un seul statement) : aucune fenêtre lecture → écriture. */
   upsert(userId: string, manhwaId: string, patch: UpdateProgressInput): Promise<ReadingProgress>;
@@ -34,6 +39,11 @@ export interface ReadingProgressRepository {
   findReadsByUser(userId: string): Promise<ChapterRead[]>;
   findReadsByUserAndManhwa(userId: string, manhwaId: string): Promise<ChapterRead[]>;
 }
+
+const NO_TRACKING: SeriesTracking = { latestChapter: null, lastScrapedAt: null, sourceStatus: null, sourceCount: 0 };
+
+/** Plus grand de deux numéros de chapitre éventuellement inconnus. */
+const highestChapter = (a: number | null, b: number | null) => (a === null ? b : b === null ? a : Math.max(a, b));
 
 export class DrizzleReadingProgressRepository implements ReadingProgressRepository {
   constructor(private readonly db: DbClient) {}
@@ -63,6 +73,66 @@ export class DrizzleReadingProgressRepository implements ReadingProgressReposito
       ...progress,
       manhwa: { ...manhwa, ...(extras.get(manhwa.id) ?? { authors: [], localCoverUrl: null }) },
     }));
+  }
+
+  async findTrackedByUser(userId: string): Promise<TrackedSeries[]> {
+    const library = await this.findAllByUser(userId);
+    const tracking = await this.loadTracking(library.map((entry) => entry.manhwaId));
+    return library.map((entry) => ({ ...entry, tracking: tracking.get(entry.manhwaId) ?? NO_TRACKING }));
+  }
+
+  /**
+   * Suivi des parutions d'une liste de séries en deux requêtes groupées (pas de N+1) :
+   * le dernier chapitre canonique, puis l'agrégat de leurs sources actives.
+   */
+  private async loadTracking(manhwaIds: readonly string[]): Promise<Map<string, SeriesTracking>> {
+    if (manhwaIds.length === 0) return new Map();
+    const ids = [...new Set(manhwaIds)];
+
+    // Dernière vérification de chaque source concernée (servie par l'index source_id, checked_at).
+    const latestHealth = this.db
+      .selectDistinctOn([sourceHealth.sourceId], { sourceId: sourceHealth.sourceId, status: sourceHealth.status })
+      .from(sourceHealth)
+      .where(
+        inArray(
+          sourceHealth.sourceId,
+          this.db.select({ sourceId: manhwaSources.sourceId }).from(manhwaSources).where(inArray(manhwaSources.manhwaId, ids)),
+        ),
+      )
+      .orderBy(sourceHealth.sourceId, desc(sourceHealth.checkedAt))
+      .as('latest_health');
+
+    const [chapterRows, sourceRows] = await Promise.all([
+      this.db
+        .select({ manhwaId: chapters.manhwaId, latestChapter: max(chapters.number) })
+        .from(chapters)
+        .where(and(inArray(chapters.manhwaId, ids), isNull(chapters.deletedAt)))
+        .groupBy(chapters.manhwaId),
+      this.db
+        .select({
+          manhwaId: manhwaSources.manhwaId,
+          latestChapter: max(manhwaSources.latestChapter),
+          lastScrapedAt: max(manhwaSources.lastScrapedAt),
+          // L'enum Postgres est ordonné (up < degraded < blocked < down) : MIN = la meilleure source.
+          sourceStatus: sql<SourceHealthStatus | null>`min(${latestHealth.status})`,
+          sourceCount: count(),
+        })
+        .from(manhwaSources)
+        .innerJoin(sources, and(eq(sources.id, manhwaSources.sourceId), isNull(sources.deletedAt)))
+        .leftJoin(latestHealth, eq(latestHealth.sourceId, manhwaSources.sourceId))
+        .where(inArray(manhwaSources.manhwaId, ids))
+        .groupBy(manhwaSources.manhwaId),
+    ]);
+
+    const tracking = new Map<string, SeriesTracking>();
+    for (const { manhwaId, latestChapter } of chapterRows) {
+      tracking.set(manhwaId, { ...NO_TRACKING, latestChapter });
+    }
+    for (const { manhwaId, latestChapter, ...sourceTracking } of sourceRows) {
+      const canonical = tracking.get(manhwaId)?.latestChapter ?? null;
+      tracking.set(manhwaId, { ...sourceTracking, latestChapter: highestChapter(canonical, latestChapter) });
+    }
+    return tracking;
   }
 
   async delete(userId: string, manhwaId: string): Promise<ReadingProgress | null> {

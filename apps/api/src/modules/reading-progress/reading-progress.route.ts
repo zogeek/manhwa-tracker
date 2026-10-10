@@ -20,6 +20,11 @@ export const createReadingProgressRoutes = (
       const progress = await service.getAllProgress(c.get('user').id);
       return c.json({ data: progress }, 200);
     })
+    // Dashboard
+    .get('/dashboard', requireAuth, async (c) => {
+      const series = await service.getDashboard(c.get('user').id);
+      return c.json({ data: series }, 200);
+    })
     .get('/progress/:manhwaId', requireAuth, validate('param', manhwaIdParamSchema), async (c) => {
       const { manhwaId } = c.req.valid('param');
       const progress = await service.getProgress(c.get('user').id, manhwaId);

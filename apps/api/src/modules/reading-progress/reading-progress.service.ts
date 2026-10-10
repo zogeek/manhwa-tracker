@@ -2,7 +2,7 @@ import type { TransactionRunner } from '../../shared/db/transaction.js';
 import { NotFoundError } from '../../shared/lib/errors.js';
 import type { ChapterRepository } from '../chapters/chapter.repository.js';
 import type { ReadingProgressRepository } from './reading-progress.repository.js';
-import type { ChapterRead, ReadingProgress, ReadingProgressWithManhwa } from './reading-progress.schema.js';
+import type { ChapterRead, ReadingProgress, ReadingProgressWithManhwa, TrackedSeries } from './reading-progress.schema.js';
 import type { LogChapterReadInput, UpdateProgressInput } from './reading-progress.validator.js';
 
 /** Repositories liés à une même transaction pour l'enregistrement d'une lecture. */
@@ -28,6 +28,11 @@ export class ReadingProgressService {
 
   async getAllProgress(userId: string): Promise<ReadingProgressWithManhwa[]> {
     return this.repo.findAllByUser(userId);
+  }
+
+  /** Tableau de bord : les séries suivies et l'état de leurs parutions. */
+  async getDashboard(userId: string): Promise<TrackedSeries[]> {
+    return this.repo.findTrackedByUser(userId);
   }
 
   /** Retire une série de la bibliothèque (l'historique des lectures est conservé). */

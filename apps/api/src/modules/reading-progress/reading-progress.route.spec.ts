@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { chapterReads } from '../../shared/db/schema.js';
+import { chapterReads, manhwaSources, sourceHealth, sources } from '../../shared/db/schema.js';
 import { seedCatalog, type SeededCatalog } from '../../shared/db/seed.test.js';
 import { createTestContext, signUp, type TestUser } from '../../test/integration.js';
 
@@ -30,6 +30,7 @@ describe('reading progress — authentication', () => {
       reading.progress[':manhwaId'].$put({ param: { manhwaId }, json: { currentChapter: 1 } }),
       reading.reads.$post({ json: { chapterId: catalog.chapterByNumber(1).id } }),
       reading.reads.$get(),
+      reading.dashboard.$get(),
     ]);
 
     expect(responses.map((res) => res.status)).toEqual(Array(responses.length).fill(401));
@@ -159,5 +160,72 @@ describe('PUT /reading/progress/:manhwaId — absolute progress (quick edit, "re
     const invalid = await Promise.all([put({ currentChapter: -1 }), put({ currentChapter: 1.234 }), put({ currentChapter: 1e7 })]);
 
     expect(invalid.map((res) => res.status)).toEqual([400, 400, 400]);
+  });
+});
+
+describe('GET /reading/dashboard — tracked series and release tracking', () => {
+  const addToLibrary = (user: TestUser) =>
+    reading.progress[':manhwaId'].$put({ param: { manhwaId: catalog.manhwa.id }, json: {} }, { headers: user.headers });
+  const dashboard = async (user: TestUser) => {
+    const res = await reading.dashboard.$get({}, { headers: user.headers });
+    expect(res.status).toBe(200);
+    return (await res.json()).data;
+  };
+
+  it('tracks the latest chapter even before any source is scraped', async () => {
+    await addToLibrary(reader);
+
+    const [entry] = await dashboard(reader);
+
+    expect(entry?.manhwa.title).toBe('Solo Leveling');
+    expect(entry?.tracking).toEqual({ latestChapter: 3, lastScrapedAt: null, sourceStatus: null, sourceCount: 0 });
+  });
+
+  it('aggregates the active sources: highest chapter, latest scrape, best current health', async () => {
+    await addToLibrary(reader);
+    await context.db.insert(manhwaSources).values([
+      { manhwaId: catalog.manhwa.id, sourceId: catalog.source.id, latestChapter: 4, lastScrapedAt: new Date('2026-10-01T08:00:00Z') },
+      { manhwaId: catalog.manhwa.id, sourceId: catalog.otherSource.id, lastScrapedAt: new Date('2026-10-09T08:00:00Z') },
+    ]);
+    await context.db.insert(sourceHealth).values([
+      // Asura : bloquée hier, rétablie depuis → seule la dernière vérification compte.
+      { sourceId: catalog.source.id, status: 'blocked', checkedAt: new Date('2026-10-08T08:00:00Z') },
+      { sourceId: catalog.source.id, status: 'up', checkedAt: new Date('2026-10-09T08:00:00Z') },
+      { sourceId: catalog.otherSource.id, status: 'down', checkedAt: new Date('2026-10-09T09:00:00Z') },
+    ]);
+
+    const [entry] = await dashboard(reader);
+
+    expect(entry?.tracking).toEqual({
+      latestChapter: 4,
+      lastScrapedAt: '2026-10-09T08:00:00.000Z',
+      sourceStatus: 'up',
+      sourceCount: 2,
+    });
+  });
+
+  it('ignores soft-deleted sources', async () => {
+    await addToLibrary(reader);
+    await context.db.insert(manhwaSources).values([
+      { manhwaId: catalog.manhwa.id, sourceId: catalog.source.id, latestChapter: 9 },
+      { manhwaId: catalog.manhwa.id, sourceId: catalog.otherSource.id },
+    ]);
+    await context.db.insert(sourceHealth).values([
+      { sourceId: catalog.source.id, status: 'up' },
+      { sourceId: catalog.otherSource.id, status: 'degraded' },
+    ]);
+    await context.db.update(sources).set({ deletedAt: new Date() }).where(eq(sources.id, catalog.source.id));
+
+    const [entry] = await dashboard(reader);
+
+    expect(entry?.tracking).toMatchObject({ latestChapter: 3, sourceStatus: 'degraded', sourceCount: 1 });
+  });
+
+  it("never shows another user's library (the session decides, there is no user parameter)", async () => {
+    const other = await signUp(context, 'other');
+    await addToLibrary(other);
+
+    expect(await dashboard(reader)).toEqual([]);
+    expect(await dashboard(other)).toHaveLength(1);
   });
 });
