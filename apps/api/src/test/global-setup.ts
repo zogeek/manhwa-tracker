@@ -1,16 +1,13 @@
-import { fileURLToPath } from 'node:url';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
-import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import type { TestProject } from 'vitest/node';
 import { createDatabase } from '../shared/db/index.js';
+import { runMigrations } from '../shared/db/migrate.js';
 
 declare module 'vitest' {
   export interface ProvidedContext {
     databaseUrl: string;
   }
 }
-
-const migrationsFolder = fileURLToPath(new URL('../../drizzle', import.meta.url));
 
 /**
  * Base de test dédiée, jamais la base de dev :
@@ -28,7 +25,7 @@ export default async function setup(project: TestProject) {
 
   const database = createDatabase(databaseUrl);
   try {
-    await migrate(database.db, { migrationsFolder });
+    await runMigrations(database.db);
   } finally {
     await database.close();
   }
