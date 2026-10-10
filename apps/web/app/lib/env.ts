@@ -15,3 +15,18 @@ export function getApiInternalUrl(value = process.env.API_INTERNAL_URL): string 
   }
   return raw.replace(/\/+$/, "");
 }
+
+const DEFAULT_DIST_DIR = ".next";
+
+/**
+ * Dossier de build de Next.js. Les tests E2E construisent dans un dossier à part (`.next-e2e`) :
+ * leur build vise une API de test, et les rewrites sont figés au build — il ne doit jamais
+ * remplacer le build de dev/prod. Chemin relatif simple uniquement (pas de `..`, pas d'absolu).
+ */
+export function getDistDir(value = process.env.NEXT_DIST_DIR): string {
+  const dir = value?.trim() || DEFAULT_DIST_DIR;
+  if (!/^\.?[A-Za-z0-9_-]+$/.test(dir)) {
+    throw new Error(`NEXT_DIST_DIR invalide : « ${dir} » (attendu : un nom de dossier, ex. .next-e2e)`);
+  }
+  return dir;
+}

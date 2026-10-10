@@ -3,7 +3,7 @@ import react from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
 
 // Tests de composants (Testing Library) dans un DOM simulé (jsdom). Les parcours complets
-// front + API relèveront de Playwright (E2E), cf. la matrice de tests du CLAUDE.md.
+// front + API relèvent de Playwright (`e2e/*.e2e.ts`, `pnpm test:e2e`), cf. la matrice de tests du CLAUDE.md.
 export default defineConfig({
   plugins: [react()],
   resolve: {
@@ -14,7 +14,7 @@ export default defineConfig({
     environment: "jsdom",
     setupFiles: ["./vitest.setup.ts"],
     include: ["**/*.spec.{ts,tsx}"],
-    exclude: ["node_modules/**", ".next/**"],
+    exclude: ["node_modules/**", ".next/**", ".next-e2e/**", "e2e/**"],
     restoreMocks: true,
   },
 });

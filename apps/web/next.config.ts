@@ -1,12 +1,14 @@
 import type { NextConfig } from "next";
 import { PUBLIC_API_RESOURCES } from "./app/lib/api-routes";
-import { getApiInternalUrl } from "./app/lib/env";
+import { getApiInternalUrl, getDistDir } from "./app/lib/env";
 import { LEGACY_ROUTES } from "./app/lib/routes";
 
 // URL du backend Hono vue par le serveur Next.js (jamais exposée au navigateur).
 const apiUrl = getApiInternalUrl();
 
 const nextConfig: NextConfig = {
+  // `.next` par défaut ; `.next-e2e` pour le build des tests Playwright (cf. playwright.config.ts).
+  distDir: getDistDir(),
   // Anciennes URLs françaises (favoris, liens partagés) : redirection permanente (308), requête conservée.
   async redirects() {
     return LEGACY_ROUTES.flatMap(({ from, to }) => [
